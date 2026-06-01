@@ -1,0 +1,7 @@
+sangen
+sangen.dSYM/
+test/.actual_*.txt
+test/.*.c
+test/.*_c
+test/.invalid_*.kbn
+.DS_Store
