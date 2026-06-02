@@ -65,11 +65,25 @@ run_case compare
 run_case numerals
 run_case ops
 run_case string
+run_case compat
+run_case context
 
 ./sangen examples/fizzbuzz.kbn --詞 > test/.actual_fizzbuzz_tokens.txt
 diff -u test/expected/debug/fizzbuzz_tokens.txt test/.actual_fizzbuzz_tokens.txt
 ./sangen examples/fizzbuzz.kbn --文樹 > test/.actual_fizzbuzz_ast.txt
 diff -u test/expected/debug/fizzbuzz_ast.txt test/.actual_fizzbuzz_ast.txt
+
+./sangen examples/compat.kbn --校 > test/.actual_compat_lint.txt
+diff -u test/expected/debug/compat_lint.txt test/.actual_compat_lint.txt
+if ./sangen examples/compat.kbn --正格 > test/.actual_compat_strict_out.txt 2> test/.actual_compat_strict_err.txt; then
+    echo "expected 正格 failure: compat" >&2
+    exit 1
+fi
+diff -u test/expected/debug/compat_lint.txt test/.actual_compat_strict_err.txt
+./sangen examples/compat.kbn --整 > test/.actual_compat_rewrite.kbn
+diff -u test/expected/debug/compat_rewrite.kbn test/.actual_compat_rewrite.kbn
+./sangen test/.actual_compat_rewrite.kbn > test/.actual_compat_rewrite_out.txt
+diff -u test/expected/compat.txt test/.actual_compat_rewrite_out.txt
 
 run_error invalid_char
 run_error missing_then

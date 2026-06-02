@@ -99,8 +99,8 @@ const char *op_name(int op)
     case T_PROD: return "積";
     case T_QUOT: return "商";
     case T_REM: return "餘";
-    case T_GT: return "過";
-    case T_LT: return "不及";
+    case T_GT: return "大";
+    case T_LT: return "小";
     case T_EQ: return "等";
     default: return "?";
     }

@@ -7,6 +7,7 @@ const char *tok_type_name(TokType type)
     case T_NUMBER: return "數";
     case T_VAR: return "天干";
     case T_IDENT: return "術之名";
+    case T_HAN: return "漢字";
     case T_STRING: return "引辭";
     case T_FAN: return "凡";
     case T_FROM: return "自";
@@ -24,11 +25,14 @@ const char *tok_type_name(TokType type)
     case T_BY: return "以";
     case T_AND: return "而";
     case T_DIVIDE: return "除";
+    case T_NO: return "無";
+    case T_HAVE: return "有";
     case T_NO_REM: return "無餘";
     case T_HAS_REM: return "有餘";
-    case T_GT: return "過";
-    case T_LT: return "不及";
+    case T_GT: return "大";
+    case T_LT: return "小";
     case T_EQ: return "等";
+    case T_AT: return "於";
     case T_WITH: return "與";
     case T_GEN: return "之";
     case T_SUM: return "和";
@@ -41,7 +45,8 @@ const char *tok_type_name(TokType type)
     case T_SUBJECT: return "者";
     case T_ASSERT: return "也";
     case T_ACCEPT: return "受";
-    case T_RETURN: return "答";
+    case T_RETURN: return "歸";
+    case T_DO: return "行";
     case T_USE: return "用";
     case T_FUNC_END: return "術畢";
     }

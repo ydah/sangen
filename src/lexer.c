@@ -10,91 +10,10 @@
 #include "support.h"
 #include "utf8.h"
 
-typedef struct {
-    const uint32_t *cps;
-    int n;
-    TokType type;
-} Keyword;
-
-static const uint32_t KW_FUNC_END[] = {0x8853, 0x7562};
 static const uint32_t KW_TEXT_START[] = {0x8FAD, 0x66F0};
 static const uint32_t KW_TEXT_END[] = {0x8FAD, 0x7562};
 static const uint32_t KW_NOTE_START[] = {0x6CE8, 0x66F0};
 static const uint32_t KW_NOTE_END[] = {0x6CE8, 0x7562};
-static const uint32_t KW_IF_END[] = {0x5DF2, 0x77E3};
-static const uint32_t KW_NOT_THEN[] = {0x4E0D, 0x7136};
-static const uint32_t KW_NO_REM[] = {0x7121, 0x9918};
-static const uint32_t KW_HAS_REM[] = {0x6709, 0x9918};
-static const uint32_t KW_OVER[] = {0x904E};
-static const uint32_t KW_NOT_REACH[] = {0x4E0D, 0x53CA};
-static const uint32_t KW_FAN[] = {0x51E1};
-static const uint32_t KW_FROM[] = {0x81EA};
-static const uint32_t KW_TO[] = {0x81F3};
-static const uint32_t KW_LOOP_END[] = {0x7109};
-static const uint32_t KW_WHEN[] = {0x7576};
-static const uint32_t KW_IF[] = {0x82E5};
-static const uint32_t KW_THEN[] = {0x5247};
-static const uint32_t KW_LET[] = {0x4EE4};
-static const uint32_t KW_BE_TRAD[] = {0x7232};
-static const uint32_t KW_SAY[] = {0x66F0};
-static const uint32_t KW_WRITE[] = {0x66F8};
-static const uint32_t KW_BY[] = {0x4EE5};
-static const uint32_t KW_AND[] = {0x800C};
-static const uint32_t KW_DIVIDE[] = {0x9664};
-static const uint32_t KW_EQ[] = {0x7B49};
-static const uint32_t KW_WITH[] = {0x8207};
-static const uint32_t KW_GEN[] = {0x4E4B};
-static const uint32_t KW_SUM[] = {0x548C};
-static const uint32_t KW_DIFF[] = {0x5DEE};
-static const uint32_t KW_PROD[] = {0x7A4D};
-static const uint32_t KW_QUOT[] = {0x5546};
-static const uint32_t KW_REM[] = {0x9918};
-static const uint32_t KW_FUNC_START[] = {0x592B};
-static const uint32_t KW_PROC[] = {0x8853};
-static const uint32_t KW_SUBJECT[] = {0x8005};
-static const uint32_t KW_ASSERT[] = {0x4E5F};
-static const uint32_t KW_ACCEPT[] = {0x53D7};
-static const uint32_t KW_RETURN[] = {0x7B54};
-static const uint32_t KW_USE[] = {0x7528};
-
-static const Keyword KEYWORDS[] = {
-    {KW_FUNC_END, 2, T_FUNC_END},
-    {KW_IF_END, 2, T_IF_END},
-    {KW_NOT_THEN, 2, T_ELSE},
-    {KW_NO_REM, 2, T_NO_REM},
-    {KW_HAS_REM, 2, T_HAS_REM},
-    {KW_NOT_REACH, 2, T_LT},
-    {KW_FAN, 1, T_FAN},
-    {KW_FROM, 1, T_FROM},
-    {KW_TO, 1, T_TO},
-    {KW_LOOP_END, 1, T_LOOP_END},
-    {KW_WHEN, 1, T_WHILE},
-    {KW_IF, 1, T_IF},
-    {KW_THEN, 1, T_THEN},
-    {KW_LET, 1, T_MAKE},
-    {KW_BE_TRAD, 1, T_BE},
-    {KW_SAY, 1, T_SAY},
-    {KW_WRITE, 1, T_WRITE},
-    {KW_BY, 1, T_BY},
-    {KW_AND, 1, T_AND},
-    {KW_DIVIDE, 1, T_DIVIDE},
-    {KW_OVER, 1, T_GT},
-    {KW_EQ, 1, T_EQ},
-    {KW_WITH, 1, T_WITH},
-    {KW_GEN, 1, T_GEN},
-    {KW_SUM, 1, T_SUM},
-    {KW_DIFF, 1, T_DIFF},
-    {KW_PROD, 1, T_PROD},
-    {KW_QUOT, 1, T_QUOT},
-    {KW_REM, 1, T_REM},
-    {KW_FUNC_START, 1, T_FUNC_START},
-    {KW_PROC, 1, T_PROC},
-    {KW_SUBJECT, 1, T_SUBJECT},
-    {KW_ASSERT, 1, T_ASSERT},
-    {KW_ACCEPT, 1, T_ACCEPT},
-    {KW_RETURN, 1, T_RETURN},
-    {KW_USE, 1, T_USE}
-};
 
 static int token_push(TokenArray *tokens, Token token)
 {
@@ -119,24 +38,8 @@ static int set_utf8_error(int line, int col, char **error)
 
 static int is_space(uint32_t cp)
 {
-    return cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n' || cp == 0x3000;
-}
-
-static int var_index(uint32_t cp)
-{
-    static const uint32_t vars[] = {
-        0x7532, 0x4E59, 0x4E19, 0x4E01, 0x620A,
-        0x5DF1, 0x5E9A, 0x8F9B, 0x58EC, 0x7678
-    };
-    int i;
-
-    for (i = 0; i < 10; i++) {
-        if (cp == vars[i]) {
-            return i;
-        }
-    }
-
-    return -1;
+    return cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n' ||
+           cp == 0x3000;
 }
 
 static const char *var_label(int var)
@@ -173,47 +76,9 @@ static int match_cps(const unsigned char *buf, size_t len, size_t pos,
     return 1;
 }
 
-static int match_keyword(const unsigned char *buf, size_t len, size_t pos,
-                         TokType *type, size_t *consumed, int *chars)
-{
-    size_t i;
-
-    for (i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); i++) {
-        if (match_cps(buf, len, pos, KEYWORDS[i].cps, KEYWORDS[i].n, consumed)) {
-            *type = KEYWORDS[i].type;
-            if (chars) {
-                *chars = KEYWORDS[i].n;
-            }
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
 static int is_identifier_char(uint32_t cp)
 {
     return (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0x9FFF);
-}
-
-static int starts_ident_boundary(const unsigned char *buf, size_t len, size_t pos)
-{
-    uint32_t cp;
-    size_t step = utf8_next(buf, len, pos, &cp);
-    TokType type;
-    size_t consumed;
-
-    if (step == 0) {
-        return 1;
-    }
-
-    if (!match_keyword(buf, len, pos, &type, &consumed, NULL)) {
-        return 0;
-    }
-
-    return type == T_PROC || type == T_SUBJECT ||
-           type == T_IF_END || type == T_ELSE ||
-           type == T_LOOP_END || type == T_RETURN || type == T_FUNC_END;
 }
 
 static char *cp_to_string(uint32_t cp)
@@ -430,41 +295,23 @@ static int read_number(const unsigned char *buf, size_t len, size_t *pos,
     return 1;
 }
 
-static int read_ident(const unsigned char *buf, size_t len, size_t *pos, int line,
-                      int *col, TokenArray *out)
+static int read_han(const unsigned char *buf, size_t len, size_t *pos, int line,
+                    int *col, TokenArray *out)
 {
-    size_t start = *pos;
-    size_t p = *pos;
-    int start_col = *col;
-    int count = 0;
+    uint32_t cp;
+    size_t step = utf8_next(buf, len, *pos, &cp);
     Token tok;
 
-    while (p < len) {
-        uint32_t cp;
-        size_t step = utf8_next(buf, len, p, &cp);
-
-        if (step == 0 || !is_identifier_char(cp)) {
-            break;
-        }
-
-        if (p != start && starts_ident_boundary(buf, len, p)) {
-            break;
-        }
-
-        p += step;
-        count++;
-    }
-
-    tok.type = T_IDENT;
+    tok.type = T_HAN;
     tok.lval = 0;
-    tok.sval = sangen_xstrndup((const char *)buf + start, p - start);
+    tok.sval = sangen_xstrndup((const char *)buf + *pos, step);
     tok.line = line;
-    tok.col = start_col;
-    tok.start = (unsigned long)start;
-    tok.end = (unsigned long)p;
+    tok.col = *col;
+    tok.start = (unsigned long)*pos;
+    tok.end = (unsigned long)(*pos + step);
     token_push(out, tok);
-    *pos = p;
-    *col += count;
+    *pos += step;
+    (*col)++;
     return 1;
 }
 
@@ -483,11 +330,7 @@ int lex_source(const unsigned char *buf, size_t len, TokenArray *out, char **err
         uint32_t cp;
         int valid;
         size_t step = utf8_next_checked(buf, len, pos, &cp, &valid);
-        int var;
-        TokType type;
         size_t consumed;
-        int token_chars;
-        Token tok;
 
         if (step == 0) {
             break;
@@ -529,37 +372,8 @@ int lex_source(const unsigned char *buf, size_t len, TokenArray *out, char **err
             continue;
         }
 
-        var = var_index(cp);
-        if (var >= 0) {
-            tok.type = T_VAR;
-            tok.lval = var;
-            tok.sval = NULL;
-            tok.line = line;
-            tok.col = col;
-            tok.start = (unsigned long)pos;
-            token_push(out, tok);
-            pos += step;
-            col++;
-            out->data[out->count - 1].end = (unsigned long)pos;
-            continue;
-        }
-
-        if (match_keyword(buf, len, pos, &type, &consumed, &token_chars)) {
-            tok.type = type;
-            tok.lval = 0;
-            tok.sval = NULL;
-            tok.line = line;
-            tok.col = col;
-            tok.start = (unsigned long)pos;
-            tok.end = (unsigned long)(pos + consumed);
-            token_push(out, tok);
-            pos += consumed;
-            col += token_chars;
-            continue;
-        }
-
         if (is_identifier_char(cp)) {
-            read_ident(buf, len, &pos, line, &col, out);
+            read_han(buf, len, &pos, line, &col, out);
             continue;
         }
 
@@ -621,7 +435,8 @@ void tokens_print(const TokenArray *tokens)
             printf(" %s", num);
         } else if (tok->type == T_VAR) {
             printf(" %s", var_label((int)tok->lval));
-        } else if (tok->type == T_STRING || tok->type == T_IDENT) {
+        } else if (tok->type == T_STRING || tok->type == T_IDENT ||
+                   tok->type == T_HAN) {
             printf(" %s", tok->sval);
         }
         printf("\n");

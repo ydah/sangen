@@ -181,7 +181,7 @@ static long checked_mul(Env *env, long lhs, long rhs, int line)
 static long checked_div(Env *env, long lhs, long rhs, int line)
 {
     if (rhs == 0) {
-        runtime_error_at(env, line, "零不可為法");
+        runtime_error_at(env, line, "零不可爲法");
         return 0;
     }
     if (lhs == LONG_MIN && rhs == -1) {
@@ -195,7 +195,7 @@ static long checked_div(Env *env, long lhs, long rhs, int line)
 static long checked_mod(Env *env, long lhs, long rhs, int line)
 {
     if (rhs == 0) {
-        runtime_error_at(env, line, "零不可為法");
+        runtime_error_at(env, line, "零不可爲法");
         return 0;
     }
     if (lhs == LONG_MIN && rhs == -1) {
@@ -244,7 +244,7 @@ static long eval_divis(Node *e, Env *env)
     }
 
     if (divisor == 0) {
-        runtime_error_at(env, e->line, "零不可為法");
+        runtime_error_at(env, e->line, "零不可爲法");
         return 0;
     }
 
