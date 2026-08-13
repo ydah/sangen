@@ -742,6 +742,7 @@ int main(int argc, char **argv)
 
     if (show_ast) {
         ast_print(program);
+        surface_print_marks(&surface, stdout);
     }
 
     if (!show_ast && !check_program(program, &error)) {

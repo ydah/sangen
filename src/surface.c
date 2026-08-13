@@ -299,3 +299,43 @@ void surface_print_normalized(const TokenArray *raw, FILE *out)
     }
     fputc('\n', out);
 }
+
+static void print_mark_unit(const Token *token, FILE *out)
+{
+    if (token->type == T_NUMBER) {
+        char number[128];
+        sangen_number_label(token->lval, number, sizeof(number));
+        fputs(number, out);
+        return;
+    }
+    fputs(token->sval ? token->sval : tok_type_name(token->type), out);
+}
+
+void surface_print_marks(const SurfaceStream *surface, FILE *out)
+{
+    int i;
+
+    if (!surface_has_marks(surface)) {
+        return;
+    }
+
+    fputs("MARKS\n", out);
+    for (i = 0; i < surface->mark_count; i++) {
+        const SourceMark *mark = &surface->marks[i];
+
+        fputs("  KAERI_RE\n    前 ", out);
+        if (mark->boundary > 0) {
+            print_mark_unit(&surface->base_tokens.data[mark->boundary - 1], out);
+        } else {
+            fputs("無", out);
+        }
+        fputs("\n    後 ", out);
+        if (mark->boundary < surface->base_tokens.count &&
+            surface->base_tokens.data[mark->boundary].type != T_EOF) {
+            print_mark_unit(&surface->base_tokens.data[mark->boundary], out);
+        } else {
+            fputs("無", out);
+        }
+        fprintf(out, "\n    SPELLING U+%04X\n", mark->spelling);
+    }
+}

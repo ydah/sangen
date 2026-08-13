@@ -1,0 +1,5 @@
+MARKS
+  KAERI_RE
+    前 書
+    後 甲
+    SPELLING U+3191

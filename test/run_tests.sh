@@ -96,6 +96,8 @@ diff -u test/expected/debug/reten_tokens.txt test/.actual_reten_tokens.txt
 diff -u test/expected/debug/reten_reading.txt test/.actual_reten_reading.txt
 ./sangen examples/reten.kbn --整=表記 > test/.actual_reten_surface.kbn
 diff -u test/expected/debug/reten_surface.kbn test/.actual_reten_surface.kbn
+./sangen examples/reten.kbn --文樹 | tail -5 > test/.actual_reten_marks.txt
+diff -u test/expected/debug/reten_marks.txt test/.actual_reten_marks.txt
 
 if ./sangen examples/reten.kbn --整 > test/.actual_reten_rewrite.kbn 2> test/.actual_reten_rewrite_err.txt; then
     echo "expected 整 failure: reten" >&2
