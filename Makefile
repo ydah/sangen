@@ -13,5 +13,5 @@ test: sangen
 	./test/run_tests.sh
 
 clean:
-	rm -f sangen test/.actual_*.txt test/.actual_*.kbn test/.*.c test/.*_c test/.invalid_*.kbn test/.expected_*.txt
+	rm -f sangen test/.actual_* test/.expected_* test/.*.c test/.*_c test/.invalid_*.kbn
 	rm -rf sangen.dSYM

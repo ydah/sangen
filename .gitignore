@@ -1,6 +1,7 @@
 sangen
 sangen.dSYM/
-test/.actual_*.txt
+test/.actual_*
+test/.expected_*
 test/.*.c
 test/.*_c
 test/.invalid_*.kbn

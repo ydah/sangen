@@ -832,7 +832,7 @@ static Node *parse_loop(Parser *p)
 {
     Node *node;
     const Token *tok = peek(p);
-    int v2_suite;
+    int indented_suite;
 
     if (!match_word(p, "凡")) {
         return NULL;
@@ -856,12 +856,12 @@ static Node *parse_loop(Parser *p)
         return NULL;
     }
     match_word(p, "者");
-    v2_suite = match_word(p, "各行");
+    indented_suite = match_word(p, "各行");
 
-    node->body = v2_suite
+    node->body = indented_suite
         ? parse_suite(p, is_loop_end, tok->line, tok->col)
         : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
-    if (!node->body || (!v2_suite && !expect_word(p, "焉", "焉"))) {
+    if (!node->body || (!indented_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
         return NULL;
     }
@@ -874,7 +874,7 @@ static Node *parse_while(Parser *p)
     static const char *while_words[] = {"當", "方"};
     Node *node;
     const Token *tok = peek(p);
-    int v2_suite;
+    int indented_suite;
 
     if (!match_any_word(p, while_words, 2)) {
         return NULL;
@@ -887,11 +887,11 @@ static Node *parse_while(Parser *p)
         return NULL;
     }
 
-    v2_suite = match_word(p, "時復行");
-    node->body = v2_suite
+    indented_suite = match_word(p, "時復行");
+    node->body = indented_suite
         ? parse_suite(p, is_loop_end, tok->line, tok->col)
         : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
-    if (!node->body || (!v2_suite && !expect_word(p, "焉", "焉"))) {
+    if (!node->body || (!indented_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
         return NULL;
     }
@@ -912,7 +912,7 @@ static Node *parse_ifchain(Parser *p)
     Node *cond;
     Node *then_block;
     const Token *tok = peek(p);
-    int v2_suite = 0;
+    int indented_suite = 0;
 
     if (!match_word(p, "若")) {
         return NULL;
@@ -931,9 +931,9 @@ static Node *parse_ifchain(Parser *p)
     }
 
     if (peek(p)->line > tok->line && peek(p)->col > tok->col) {
-        v2_suite = 1;
+        indented_suite = 1;
     }
-    then_block = v2_suite
+    then_block = indented_suite
         ? parse_suite(p, is_if_body_stop, tok->line, tok->col)
         : parse_block_until(p, is_if_body_stop, tok->line, tok->col, 0);
     if (!then_block) {
@@ -946,7 +946,7 @@ static Node *parse_ifchain(Parser *p)
     while (is_else(p)) {
         static const char *else_words[] = {"不然", "否則"};
         const Token *else_tok = peek(p);
-        int branch_v2;
+        int branch_suite;
 
         match_any_word(p, else_words, 2);
         if (match_word(p, "若")) {
@@ -961,10 +961,10 @@ static Node *parse_ifchain(Parser *p)
                 return NULL;
             }
 
-            branch_v2 = peek(p)->line > else_tok->line &&
-                        peek(p)->col > else_tok->col;
-            v2_suite = v2_suite || branch_v2;
-            then_block = branch_v2
+            branch_suite = peek(p)->line > else_tok->line &&
+                           peek(p)->col > else_tok->col;
+            indented_suite = indented_suite || branch_suite;
+            then_block = branch_suite
                 ? parse_suite(p, is_if_body_stop, else_tok->line, else_tok->col)
                 : parse_block_until(p, is_if_body_stop,
                                     else_tok->line, else_tok->col, 0);
@@ -977,10 +977,10 @@ static Node *parse_ifchain(Parser *p)
             continue;
         }
 
-        branch_v2 = peek(p)->line > else_tok->line &&
-                    peek(p)->col > else_tok->col;
-        v2_suite = v2_suite || branch_v2;
-        node->els = branch_v2
+        branch_suite = peek(p)->line > else_tok->line &&
+                       peek(p)->col > else_tok->col;
+        indented_suite = indented_suite || branch_suite;
+        node->els = branch_suite
             ? parse_suite(p, is_if_end, else_tok->line, else_tok->col)
             : parse_block_until(p, is_if_end,
                                 else_tok->line, else_tok->col, 0);
@@ -991,7 +991,7 @@ static Node *parse_ifchain(Parser *p)
         break;
     }
 
-    if (v2_suite) {
+    if (indented_suite) {
         if (is_if_end(p)) {
             expect_if_end(p);
         }
@@ -1016,7 +1016,7 @@ static Node *parse_function(Parser *p)
     Node *node;
     const Token *tok = peek(p);
     int saw_param;
-    int v2_return;
+    int explicit_return;
 
     if (!match_word(p, "夫")) {
         return NULL;
@@ -1070,13 +1070,13 @@ static Node *parse_function(Parser *p)
         return NULL;
     }
 
-    v2_return = match_word(p, "乃得");
-    if (!v2_return && !expect_any_word(p, return_words, 2, "歸")) {
+    explicit_return = match_word(p, "乃得");
+    if (!explicit_return && !expect_any_word(p, return_words, 2, "歸")) {
         ast_free(node);
         return NULL;
     }
     node->expr = parse_expr(p);
-    if (!node->expr || (!v2_return && !expect_func_end(p))) {
+    if (!node->expr || (!explicit_return && !expect_func_end(p))) {
         ast_free(node);
         return NULL;
     }

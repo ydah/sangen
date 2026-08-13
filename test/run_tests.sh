@@ -68,10 +68,15 @@ run_case string
 run_case compat
 run_case context
 run_case reten
-run_case v2
+run_case grammar
 run_case reten_compat
 ./sangen examples/reten_compat.kbn --校=訓點 > test/.actual_reten_compat_lint.txt
 diff -u test/expected/debug/reten_compat_lint.txt test/.actual_reten_compat_lint.txt
+if ./sangen examples/grammar.kbn --文法=v2 > test/.actual_removed_grammar_option.out 2> test/.actual_removed_grammar_option.err; then
+    echo "expected removed grammar option to fail" >&2
+    exit 1
+fi
+diff -u test/expected/debug/removed_grammar_option.txt test/.actual_removed_grammar_option.err
 
 ./sangen examples/fizzbuzz.kbn --詞 > test/.actual_fizzbuzz_tokens.txt
 diff -u test/expected/debug/fizzbuzz_tokens.txt test/.actual_fizzbuzz_tokens.txt
@@ -124,7 +129,7 @@ run_error reten_punct_boundary
 run_error reten_number_split
 run_error reten_word_split
 run_error reten_name_split
-run_error v2_arg_count
+run_error arg_count
 run_error quoted_string
 run_error undefined_func
 run_error unclosed_text
