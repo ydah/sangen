@@ -290,6 +290,7 @@ static int read_number(const unsigned char *buf, size_t len, size_t *pos,
     tok.col = start_col;
     tok.start = (unsigned long)start_pos;
     tok.end = (unsigned long)*pos;
+    tok.spelling = 0;
     free(cps);
     token_push(out, tok);
     return 1;
@@ -309,6 +310,7 @@ static int read_han(const unsigned char *buf, size_t len, size_t *pos, int line,
     tok.col = *col;
     tok.start = (unsigned long)*pos;
     tok.end = (unsigned long)(*pos + step);
+    tok.spelling = 0;
     token_push(out, tok);
     *pos += step;
     (*col)++;
@@ -365,6 +367,23 @@ int lex_source(const unsigned char *buf, size_t len, TokenArray *out, char **err
             continue;
         }
 
+        if (cp == 0x3191 || cp == 0x30EC) {
+            Token tok;
+
+            tok.type = T_KAERI_RE;
+            tok.lval = 0;
+            tok.sval = cp_to_string(cp);
+            tok.line = line;
+            tok.col = col;
+            tok.start = (unsigned long)pos;
+            tok.end = (unsigned long)(pos + step);
+            tok.spelling = cp;
+            token_push(out, tok);
+            pos += step;
+            col++;
+            continue;
+        }
+
         if (numeral_is_digit(cp)) {
             if (!read_number(buf, len, &pos, line, &col, out, error)) {
                 return 0;
@@ -396,6 +415,7 @@ int lex_source(const unsigned char *buf, size_t len, TokenArray *out, char **err
         eof.col = col;
         eof.start = (unsigned long)pos;
         eof.end = (unsigned long)pos;
+        eof.spelling = 0;
         token_push(out, eof);
     }
 
@@ -438,6 +458,40 @@ void tokens_print(const TokenArray *tokens)
         } else if (tok->type == T_STRING || tok->type == T_IDENT ||
                    tok->type == T_HAN) {
             printf(" %s", tok->sval);
+        } else if (tok->type == T_KAERI_RE) {
+            int before = i - 1;
+            int after = i + 1;
+
+            while (before >= 0 && tokens->data[before].type == T_KAERI_RE) {
+                before--;
+            }
+            while (after < tokens->count &&
+                   tokens->data[after].type == T_KAERI_RE) {
+                after++;
+            }
+            printf(" %s 境界=", tok->sval ? tok->sval : "㆑");
+            if (before >= 0 && tokens->data[before].type != T_EOF) {
+                if (tokens->data[before].sval) {
+                    printf("%s", tokens->data[before].sval);
+                } else {
+                    printf("%s", tok_type_name(tokens->data[before].type));
+                }
+            } else {
+                printf("無");
+            }
+            printf("|");
+            if (after < tokens->count && tokens->data[after].type != T_EOF) {
+                if (tokens->data[after].sval) {
+                    printf("%s", tokens->data[after].sval);
+                } else {
+                    printf("%s", tok_type_name(tokens->data[after].type));
+                }
+            } else {
+                printf("無");
+            }
+            if (tok->spelling == 0x30EC) {
+                printf(" 非正規 宜用㆑");
+            }
         }
         printf("\n");
     }

@@ -49,6 +49,7 @@ const char *tok_type_name(TokType type)
     case T_DO: return "行";
     case T_USE: return "用";
     case T_FUNC_END: return "術畢";
+    case T_KAERI_RE: return "返點";
     }
 
     return "?";

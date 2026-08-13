@@ -1,6 +1,8 @@
 #ifndef SANGEN_TOKEN_H
 #define SANGEN_TOKEN_H
 
+#include <stdint.h>
+
 typedef enum {
     T_EOF,
     T_NUMBER,
@@ -47,7 +49,8 @@ typedef enum {
     T_RETURN,
     T_DO,
     T_USE,
-    T_FUNC_END
+    T_FUNC_END,
+    T_KAERI_RE
 } TokType;
 
 typedef struct {
@@ -58,6 +61,7 @@ typedef struct {
     int col;
     unsigned long start;
     unsigned long end;
+    uint32_t spelling;
 } Token;
 
 const char *tok_type_name(TokType type);

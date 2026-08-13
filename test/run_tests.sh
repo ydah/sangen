@@ -67,6 +67,7 @@ run_case ops
 run_case string
 run_case compat
 run_case context
+run_case reten
 
 ./sangen examples/fizzbuzz.kbn --詞 > test/.actual_fizzbuzz_tokens.txt
 diff -u test/expected/debug/fizzbuzz_tokens.txt test/.actual_fizzbuzz_tokens.txt
@@ -85,6 +86,18 @@ diff -u test/expected/debug/compat_rewrite.kbn test/.actual_compat_rewrite.kbn
 ./sangen test/.actual_compat_rewrite.kbn > test/.actual_compat_rewrite_out.txt
 diff -u test/expected/compat.txt test/.actual_compat_rewrite_out.txt
 
+./sangen examples/reten.kbn --詞 > test/.actual_reten_tokens.txt
+diff -u test/expected/debug/reten_tokens.txt test/.actual_reten_tokens.txt
+./sangen examples/reten.kbn --讀順 > test/.actual_reten_reading.txt
+diff -u test/expected/debug/reten_reading.txt test/.actual_reten_reading.txt
+
+if ./sangen examples/reten.kbn --整 > test/.actual_reten_rewrite.kbn 2> test/.actual_reten_rewrite_err.txt; then
+    echo "expected 整 failure: reten" >&2
+    exit 1
+fi
+printf '%s\n' '返點有り 整文すれば失所す' > test/.expected_reten_rewrite_err.txt
+diff -u test/.expected_reten_rewrite_err.txt test/.actual_reten_rewrite_err.txt
+
 run_error invalid_char
 run_error missing_then
 run_error div_zero
@@ -95,6 +108,13 @@ run_error overflow
 run_error duplicate_func
 run_error duplicate_param
 run_error nested_func
+run_error reten_no_before
+run_error reten_no_after
+run_error reten_duplicate
+run_error reten_cross_line
+run_error reten_number_split
+run_error reten_word_split
+run_error reten_name_split
 run_error undefined_func
 run_error unclosed_text
 run_error unclosed_note

@@ -9,11 +9,13 @@
 #include "lexer.h"
 #include "message.h"
 #include "parser.h"
+#include "reading.h"
+#include "surface.h"
 #include "utf8.h"
 
 static void usage(FILE *out)
 {
-    fputs("用曰 sangen 源.kbn [--字碼] [--詞] [--文樹] [--譯=c] [--校] [--正格] [--整]\n", out);
+    fputs("用曰 sangen 源.kbn [--字碼] [--詞] [--文樹] [--讀順] [--譯=c] [--校] [--正格] [--整]\n", out);
 }
 
 static int has_kbn_suffix(const char *path)
@@ -485,6 +487,7 @@ int main(int argc, char **argv)
     unsigned char *source = NULL;
     size_t len = 0;
     TokenArray tokens;
+    SurfaceStream surface;
     Node *program = NULL;
     Env env;
     char *error = NULL;
@@ -495,6 +498,7 @@ int main(int argc, char **argv)
     int strict_kanbun = 0;
     int lint_kanbun_mode = 0;
     int rewrite_kanbun_mode = 0;
+    int show_reading = 0;
     int i;
     int status = EXIT_FAILURE;
 
@@ -516,6 +520,8 @@ int main(int argc, char **argv)
             show_tokens = 1;
         } else if (strcmp(argv[i], "--字碼") == 0) {
             show_codepoints = 1;
+        } else if (strcmp(argv[i], "--讀順") == 0) {
+            show_reading = 1;
         } else if (strcmp(argv[i], "--譯=c") == 0) {
             backend_c = 1;
         } else if (strcmp(argv[i], "--正格") == 0 ||
@@ -535,13 +541,13 @@ int main(int argc, char **argv)
     }
 
     if ((show_ast ? 1 : 0) + (show_tokens ? 1 : 0) +
-        (show_codepoints ? 1 : 0) + (backend_c ? 1 : 0) +
+        (show_codepoints ? 1 : 0) + (show_reading ? 1 : 0) + (backend_c ? 1 : 0) +
         (lint_kanbun_mode ? 1 : 0) + (rewrite_kanbun_mode ? 1 : 0) > 1) {
         fprintf(stderr, "諸選不可並用\n");
         return EXIT_FAILURE;
     }
 
-    if (strict_kanbun && (show_ast || show_tokens || show_codepoints ||
+    if (strict_kanbun && (show_ast || show_tokens || show_codepoints || show_reading ||
                           backend_c || lint_kanbun_mode || rewrite_kanbun_mode)) {
         fprintf(stderr, "諸選不可兼用\n");
         return EXIT_FAILURE;
@@ -571,6 +577,12 @@ int main(int argc, char **argv)
         goto cleanup_source;
     }
 
+    if (!surface_build(&tokens, &surface, &error)) {
+        fprintf(stderr, "%s\n", error ? error : "返點難識");
+        free(error);
+        goto cleanup_tokens;
+    }
+
     if (lint_kanbun_mode) {
         lint_kanbun(&tokens, stdout);
         status = EXIT_SUCCESS;
@@ -584,10 +596,25 @@ int main(int argc, char **argv)
     if (show_tokens) {
         tokens_print(&tokens);
         status = EXIT_SUCCESS;
-        goto cleanup_tokens;
+        goto cleanup_surface;
     }
 
-    program = parse_program(tokens.data, tokens.count, &error);
+    if (show_reading) {
+        ReadingOrder order;
+
+        if (!derive_reading_order(&surface, &order, &error)) {
+            fprintf(stderr, "%s\n", error ? error : "讀順難識");
+            free(error);
+            goto cleanup_surface;
+        }
+        reading_order_print(&surface, &order, stdout);
+        reading_order_free(&order);
+        status = EXIT_SUCCESS;
+        goto cleanup_surface;
+    }
+
+    program = parse_program(surface.base_tokens.data,
+                            surface.base_tokens.count, &error);
     if (!program) {
         fprintf(stderr, "%s\n", error ? error : "文法難識");
         free(error);
@@ -595,6 +622,10 @@ int main(int argc, char **argv)
     }
 
     if (rewrite_kanbun_mode) {
+        if (surface_has_marks(&surface)) {
+            fprintf(stderr, "返點有り 整文すれば失所す\n");
+            goto cleanup_surface;
+        }
         if (!check_program(program, &error)) {
             fprintf(stderr, "%s\n", error ? error : "義理不通");
             free(error);
@@ -631,6 +662,8 @@ int main(int argc, char **argv)
 
 cleanup_tokens:
     ast_free(program);
+cleanup_surface:
+    surface_free(&surface);
     tokens_free(&tokens);
 cleanup_source:
     free(source);
