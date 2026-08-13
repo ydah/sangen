@@ -13,9 +13,23 @@
 #include "surface.h"
 #include "utf8.h"
 
+typedef enum {
+    LINT_ALL,
+    LINT_GRAMMAR,
+    LINT_STYLE,
+    LINT_GLYPH,
+    LINT_MARK
+} LintMode;
+
+typedef enum {
+    GRAMMAR_COMPAT,
+    GRAMMAR_V1,
+    GRAMMAR_V2
+} GrammarProfile;
+
 static void usage(FILE *out)
 {
-    fputs("用曰 sangen 源.kbn [--字碼] [--詞] [--文樹] [--讀順] [--譯=c] [--校] [--正格] [--整]\n", out);
+    fputs("用曰 sangen 源.kbn [--字碼] [--詞] [--文樹] [--讀順] [--譯=c] [--校[=文法|文體|字體|訓點]] [--文法=v1|v2|compat] [--正格] [--整[=表記]]\n", out);
 }
 
 static int has_kbn_suffix(const char *path)
@@ -234,50 +248,71 @@ static int report_kanbun_issue(FILE *out, const Token *tok, const char *message)
     return 1;
 }
 
-static int lint_kanbun(const TokenArray *tokens, FILE *out)
+static int lint_kanbun(const TokenArray *tokens, FILE *out, LintMode mode)
 {
     int issues = 0;
     int i;
 
     for (i = 0; i < tokens->count && tokens->data[i].type != T_EOF; i++) {
-        if (is_word_at(tokens, i, "使")) {
+        if (tokens->data[i].type == T_KAERI_RE) {
+            if ((mode == LINT_ALL || mode == LINT_MARK) &&
+                tokens->data[i].spelling == 0x30EC) {
+                issues += report_kanbun_issue(
+                    out, &tokens->data[i], "此乃片假名 宜用返點「㆑」");
+            }
+            continue;
+        }
+
+        if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+            is_word_at(tokens, i, "使")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「令」");
-        } else if (is_word_at(tokens, i, "為")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GLYPH) &&
+                   is_word_at(tokens, i, "為")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「爲」");
-        } else if (is_word_at(tokens, i, "方")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "方")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「當」");
-        } else if (is_word_at(tokens, i, "否則")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "否則")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「不然」");
-        } else if (is_word_at(tokens, i, "答")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "答")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「歸」");
-        } else if (is_word_at(tokens, i, "而已矣")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "而已矣")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「已矣」");
-        } else if (is_word_at(tokens, i, "術畢")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "術畢")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「已矣」");
-        } else if (is_word_at(tokens, i, "過")) {
+        } else if ((mode == LINT_ALL || mode == LINT_STYLE) &&
+                   is_word_at(tokens, i, "過")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「大於」");
-        } else if (is_word_at(tokens, i, "不及")) {
+        } else if ((mode == LINT_ALL || mode == LINT_STYLE) &&
+                   is_word_at(tokens, i, "不及")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「小於」");
-        } else if (is_word_at(tokens, i, "等") &&
+        } else if ((mode == LINT_ALL || mode == LINT_STYLE) &&
+                   is_word_at(tokens, i, "等") &&
                    !is_word_at(tokens, i + 1, "於") &&
                    !with_eq_form(tokens, i)) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「等於」");
-        } else if (is_word_at(tokens, i, "行")) {
+        } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+                   is_word_at(tokens, i, "行")) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜冠「用」而省「行」");
         }
 
-        if (is_word_at(tokens, i, "除") &&
+        if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+            is_word_at(tokens, i, "除") &&
             i + 2 < tokens->count &&
             var_at(tokens, i + 1) &&
             (is_word_at(tokens, i + 2, "無") ||
@@ -286,9 +321,42 @@ static int lint_kanbun(const TokenArray *tokens, FILE *out)
                                            "此處宜加「而」");
         }
 
-        if (is_word_at(tokens, i, "術") && !call_has_use_prefix(tokens, i)) {
+        if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
+            is_word_at(tokens, i, "術") && !call_has_use_prefix(tokens, i)) {
             issues += report_kanbun_issue(out, &tokens->data[i - 1],
                                            "術之用未明 宜冠「用」");
+        }
+    }
+
+    return issues;
+}
+
+static int lint_profile(const TokenArray *tokens, FILE *out,
+                        GrammarProfile profile)
+{
+    int issues = 0;
+    int i;
+
+    if (profile == GRAMMAR_COMPAT) {
+        return 0;
+    }
+
+    for (i = 0; i < tokens->count && tokens->data[i].type != T_EOF; i++) {
+        if (profile == GRAMMAR_V2) {
+            if (is_word_at(tokens, i, "令") || is_word_at(tokens, i, "使")) {
+                issues += report_kanbun_issue(
+                    out, &tokens->data[i], "文法v2 宜曰「置値於天干」");
+            } else if (is_word_at(tokens, i, "歸") ||
+                       is_word_at(tokens, i, "答")) {
+                issues += report_kanbun_issue(
+                    out, &tokens->data[i], "文法v2 宜曰「乃得」");
+            }
+        } else if (is_word_at(tokens, i, "置") ||
+                   is_word_at(tokens, i, "乃得") ||
+                   is_word_at(tokens, i, "各行") ||
+                   is_word_at(tokens, i, "時復行")) {
+            issues += report_kanbun_issue(
+                out, &tokens->data[i], "文法v1 未受此語");
         }
     }
 
@@ -497,7 +565,10 @@ int main(int argc, char **argv)
     int backend_c = 0;
     int strict_kanbun = 0;
     int lint_kanbun_mode = 0;
+    LintMode lint_mode = LINT_ALL;
+    GrammarProfile grammar_profile = GRAMMAR_COMPAT;
     int rewrite_kanbun_mode = 0;
+    int surface_rewrite_mode = 0;
     int show_reading = 0;
     int i;
     int status = EXIT_FAILURE;
@@ -527,12 +598,33 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--正格") == 0 ||
                    strcmp(argv[i], "--strict-kanbun") == 0) {
             strict_kanbun = 1;
+        } else if (strcmp(argv[i], "--文法=v1") == 0) {
+            grammar_profile = GRAMMAR_V1;
+        } else if (strcmp(argv[i], "--文法=v2") == 0) {
+            grammar_profile = GRAMMAR_V2;
+        } else if (strcmp(argv[i], "--文法=compat") == 0) {
+            grammar_profile = GRAMMAR_COMPAT;
         } else if (strcmp(argv[i], "--校") == 0 ||
                    strcmp(argv[i], "--lint-kanbun") == 0) {
             lint_kanbun_mode = 1;
+            lint_mode = LINT_ALL;
+        } else if (strcmp(argv[i], "--校=文法") == 0) {
+            lint_kanbun_mode = 1;
+            lint_mode = LINT_GRAMMAR;
+        } else if (strcmp(argv[i], "--校=文體") == 0) {
+            lint_kanbun_mode = 1;
+            lint_mode = LINT_STYLE;
+        } else if (strcmp(argv[i], "--校=字體") == 0) {
+            lint_kanbun_mode = 1;
+            lint_mode = LINT_GLYPH;
+        } else if (strcmp(argv[i], "--校=訓點") == 0) {
+            lint_kanbun_mode = 1;
+            lint_mode = LINT_MARK;
         } else if (strcmp(argv[i], "--整") == 0 ||
                    strcmp(argv[i], "--rewrite-kanbun") == 0) {
             rewrite_kanbun_mode = 1;
+        } else if (strcmp(argv[i], "--整=表記") == 0) {
+            surface_rewrite_mode = 1;
         } else {
             fprintf(stderr, "不識此選 %s\n", argv[i]);
             usage(stderr);
@@ -542,13 +634,15 @@ int main(int argc, char **argv)
 
     if ((show_ast ? 1 : 0) + (show_tokens ? 1 : 0) +
         (show_codepoints ? 1 : 0) + (show_reading ? 1 : 0) + (backend_c ? 1 : 0) +
-        (lint_kanbun_mode ? 1 : 0) + (rewrite_kanbun_mode ? 1 : 0) > 1) {
+        (lint_kanbun_mode ? 1 : 0) + (rewrite_kanbun_mode ? 1 : 0) +
+        (surface_rewrite_mode ? 1 : 0) > 1) {
         fprintf(stderr, "諸選不可並用\n");
         return EXIT_FAILURE;
     }
 
     if (strict_kanbun && (show_ast || show_tokens || show_codepoints || show_reading ||
-                          backend_c || lint_kanbun_mode || rewrite_kanbun_mode)) {
+                          backend_c || lint_kanbun_mode || rewrite_kanbun_mode ||
+                          surface_rewrite_mode)) {
         fprintf(stderr, "諸選不可兼用\n");
         return EXIT_FAILURE;
     }
@@ -584,13 +678,17 @@ int main(int argc, char **argv)
     }
 
     if (lint_kanbun_mode) {
-        lint_kanbun(&tokens, stdout);
+        lint_kanbun(&tokens, stdout, lint_mode);
         status = EXIT_SUCCESS;
         goto cleanup_tokens;
     }
 
-    if (strict_kanbun && lint_kanbun(&tokens, stderr) > 0) {
+    if (strict_kanbun && lint_kanbun(&tokens, stderr, LINT_ALL) > 0) {
         goto cleanup_tokens;
+    }
+
+    if (lint_profile(&tokens, stderr, grammar_profile) > 0) {
+        goto cleanup_surface;
     }
 
     if (show_tokens) {
@@ -609,6 +707,12 @@ int main(int argc, char **argv)
         }
         reading_order_print(&surface, &order, stdout);
         reading_order_free(&order);
+        status = EXIT_SUCCESS;
+        goto cleanup_surface;
+    }
+
+    if (surface_rewrite_mode) {
+        surface_print_normalized(&tokens, stdout);
         status = EXIT_SUCCESS;
         goto cleanup_surface;
     }

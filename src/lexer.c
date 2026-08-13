@@ -167,6 +167,7 @@ static int read_string(const unsigned char *buf, size_t len, size_t *pos,
             tok.col = start_col;
             tok.start = (unsigned long)start_pos;
             tok.end = (unsigned long)(p + end_len);
+            tok.spelling = 0;
             token_push(out, tok);
             *pos = p + end_len;
             *col += 2;
@@ -384,6 +385,23 @@ int lex_source(const unsigned char *buf, size_t len, TokenArray *out, char **err
             continue;
         }
 
+        if (cp == 0x3002 || cp == 0xFF1B || cp == 0x3001 || cp == 0xFF0C) {
+            Token tok;
+
+            tok.type = T_PUNCT;
+            tok.lval = (long)cp;
+            tok.sval = cp_to_string(cp);
+            tok.line = line;
+            tok.col = col;
+            tok.start = (unsigned long)pos;
+            tok.end = (unsigned long)(pos + step);
+            tok.spelling = cp;
+            token_push(out, tok);
+            pos += step;
+            col++;
+            continue;
+        }
+
         if (numeral_is_digit(cp)) {
             if (!read_number(buf, len, &pos, line, &col, out, error)) {
                 return 0;
@@ -492,6 +510,8 @@ void tokens_print(const TokenArray *tokens)
             if (tok->spelling == 0x30EC) {
                 printf(" 非正規 宜用㆑");
             }
+        } else if (tok->type == T_PUNCT) {
+            printf(" %s", tok->sval ? tok->sval : "");
         }
         printf("\n");
     }

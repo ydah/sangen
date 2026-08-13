@@ -50,7 +50,8 @@ typedef enum {
     T_DO,
     T_USE,
     T_FUNC_END,
-    T_KAERI_RE
+    T_KAERI_RE,
+    T_PUNCT
 } TokType;
 
 typedef struct {

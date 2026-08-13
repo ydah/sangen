@@ -121,12 +121,27 @@ static int check_expr(Checker *c, const Node *node)
     case N_BINEXPR:
         return check_expr(c, node->lhs) && check_expr(c, node->rhs);
     case N_DIVIS:
-        return check_expr(c, node->divisor);
+        return check_expr(c, node->divisor) &&
+               check_expr(c, node->dividend_expr);
     case N_COMPARE:
         return check_expr(c, node->lhs) && check_expr(c, node->rhs);
     case N_CALL:
         if (!find_func(c, node->name ? node->name : "")) {
             return fail(c, node->line, "術%s未立", node->name ? node->name : "");
+        }
+        {
+            const Node *func = find_func(c, node->name ? node->name : "");
+            int i;
+
+            for (i = 0; i < node->nargs; i++) {
+                if (!check_expr(c, node->args[i])) {
+                    return 0;
+                }
+            }
+            if (node->nargs > 0 && node->nargs != func->nparam) {
+                return fail(c, node->line, "術%s實參數不合",
+                            node->name ? node->name : "");
+            }
         }
         return 1;
     default:

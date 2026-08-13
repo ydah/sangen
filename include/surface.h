@@ -2,6 +2,7 @@
 #define SANGEN_SURFACE_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "lexer.h"
 
@@ -34,5 +35,6 @@ typedef struct {
 int surface_build(const TokenArray *raw, SurfaceStream *surface, char **error);
 void surface_free(SurfaceStream *surface);
 int surface_has_marks(const SurfaceStream *surface);
+void surface_print_normalized(const TokenArray *raw, FILE *out);
 
 #endif

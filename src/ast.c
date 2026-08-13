@@ -56,6 +56,17 @@ void node_func_append_param(Node *node, int var, int line)
     node->param_lines[node->nparam - 1] = line;
 }
 
+void node_call_append_arg(Node *node, Node *arg)
+{
+    if (!node || node->kind != N_CALL) {
+        return;
+    }
+
+    node->args = sangen_xrealloc(node->args,
+                                 sizeof(Node *) * (size_t)(node->nargs + 1));
+    node->args[node->nargs++] = arg;
+}
+
 const char *node_kind_name(NodeKind kind)
 {
     switch (kind) {
@@ -143,8 +154,13 @@ static void print_node(const Node *node, int depth)
         print_node(node->rhs, depth + 2);
         break;
     case N_DIVIS:
-        printf("除餘 %s %s\n", var_name(node->dividend),
+        printf("除餘 %s %s\n", node->dividend_expr ? "式" : var_name(node->dividend),
                node->want_no_rem ? "無餘" : "有餘");
+        if (node->dividend_expr) {
+            indent(depth + 2);
+            printf("實\n");
+            print_node(node->dividend_expr, depth + 4);
+        }
         indent(depth + 2);
         printf("法\n");
         print_node(node->divisor, depth + 4);
@@ -166,7 +182,15 @@ static void print_node(const Node *node, int depth)
         print_node(node->expr, depth + 2);
         break;
     case N_CALL:
-        printf("用術 %s\n", node->name ? node->name : "");
+        printf("用術 %s", node->name ? node->name : "");
+        if (node->nargs > 0) {
+            printf(" 以");
+            for (i = 0; i < node->nargs; i++) {
+                printf("\n");
+                print_node(node->args[i], depth + 4);
+            }
+        }
+        printf("\n");
         break;
     case N_FOR:
         printf("歷 %s\n", var_name(node->var));
@@ -252,6 +276,7 @@ void ast_free(Node *node)
     ast_free(node->lhs);
     ast_free(node->rhs);
     ast_free(node->divisor);
+    ast_free(node->dividend_expr);
     ast_free(node->expr);
     ast_free(node->from);
     ast_free(node->to);
@@ -271,6 +296,10 @@ void ast_free(Node *node)
     free(node->stmts);
     free(node->str);
     free(node->name);
+    for (i = 0; i < node->nargs; i++) {
+        ast_free(node->args[i]);
+    }
+    free(node->args);
     free(node->params);
     free(node->param_lines);
     free(node);

@@ -14,6 +14,9 @@ typedef struct {
     int count;
     int pos;
     char *error;
+    int block_line;
+    int block_col;
+    int indent_stop;
 } Parser;
 
 typedef int (*StopFn)(Parser *);
@@ -223,8 +226,10 @@ static int expect_ident_until(Parser *p, char **name, const char *stop)
     size_t len = 0;
     size_t cap = 0;
     int saw = 0;
+    int line = peek(p)->line;
 
-    while (peek(p)->type != T_EOF && !is_word_at(p, stop)) {
+    while (peek(p)->type != T_EOF && peek(p)->line == line &&
+           !is_word_at(p, stop)) {
         if (peek(p)->type != T_HAN) {
             free(buf);
             return fail(p, peek(p)->line, "闕術之名");
@@ -246,8 +251,9 @@ static int expect_ident_until(Parser *p, char **name, const char *stop)
 static int has_ident_until(Parser *p, int pos, const char *stop)
 {
     int saw = 0;
+    int line = token_at(p, pos)->line;
 
-    while (token_at(p, pos)->type == T_HAN) {
+    while (token_at(p, pos)->type == T_HAN && token_at(p, pos)->line == line) {
         if (word_len_at(p, pos, stop) > 0) {
             return saw;
         }
@@ -327,82 +333,69 @@ static int is_if_body_stop(Parser *p)
 static int is_return_stop(Parser *p)
 {
     return is_word_at(p, "歸") || is_word_at(p, "答") ||
+           is_word_at(p, "乃得") ||
            peek(p)->type == T_EOF;
 }
 
 static Node *parse_item(Parser *p);
 static Node *parse_expr(Parser *p);
 static Node *parse_cond(Parser *p);
+static Node *parse_primary(Parser *p);
 
-static Node *parse_block_until(Parser *p, StopFn stop)
+static int at_indent_boundary(Parser *p)
+{
+    return p->indent_stop && peek(p)->type != T_EOF &&
+           peek(p)->line > p->block_line && peek(p)->col <= p->block_col;
+}
+
+static Node *parse_block_until(Parser *p, StopFn stop, int line, int col,
+                               int indent_stop)
 {
     Node *block = node_new(N_BLOCK, peek(p)->line);
+    int old_line = p->block_line;
+    int old_col = p->block_col;
+    int old_indent_stop = p->indent_stop;
 
-    while (!stop(p)) {
+    p->block_line = line;
+    p->block_col = col;
+    p->indent_stop = indent_stop;
+
+    while (!stop(p) && !at_indent_boundary(p)) {
         Node *item = parse_item(p);
         if (!item) {
+            p->block_line = old_line;
+            p->block_col = old_col;
+            p->indent_stop = old_indent_stop;
             ast_free(block);
             return NULL;
         }
         node_block_append(block, item);
     }
 
+    p->block_line = old_line;
+    p->block_col = old_col;
+    p->indent_stop = old_indent_stop;
+
     return block;
 }
 
-static int atom_end_at(Parser *p, int pos)
+static Node *parse_suite(Parser *p, StopFn stop, int line, int col)
 {
-    int ignored;
+    Node *block;
 
-    if (token_at(p, pos)->type == T_NUMBER) {
-        return pos + 1;
-    }
+    if (peek(p)->line == line) {
+        Node *item = parse_item(p);
 
-    if (word_len_at(p, pos, "用") > 0) {
-        int start = pos + word_len_at(p, pos, "用");
-
-        while (token_at(p, start)->type == T_HAN) {
-            if (word_len_at(p, start, "術") > 0) {
-                return start + word_len_at(p, start, "術");
-            }
-            start++;
+        if (!item) {
+            return NULL;
         }
-        return -1;
+        block = node_new(N_BLOCK, item->line);
+        node_block_append(block, item);
+        return block;
     }
 
-    if (has_ident_until(p, pos, "術")) {
-        int end = pos;
-
-        while (token_at(p, end)->type == T_HAN &&
-               word_len_at(p, end, "術") == 0) {
-            end++;
-        }
-        return end + word_len_at(p, end, "術");
-    }
-
-    if (var_at(p, pos, &ignored)) {
-        return pos + 1;
-    }
-
-    return -1;
-}
-
-static int has_expr_tail(Parser *p, int *has_with)
-{
-    int start = p->pos;
-    int rhs_start = start;
-    int rhs_end;
-
-    *has_with = 0;
-    if (word_len_at(p, start, "與") > 0) {
-        *has_with = 1;
-        rhs_start = start + word_len_at(p, start, "與");
-    }
-
-    rhs_end = atom_end_at(p, rhs_start);
-    return rhs_end >= 0 &&
-           word_len_at(p, rhs_end, "之") > 0 &&
-           is_expr_op((TokType)op_at(p, rhs_end + word_len_at(p, rhs_end, "之")));
+    return parse_block_until(p, stop, line, col,
+                             peek(p)->line > line && peek(p)->col > col);
 }
 
 static Node *parse_call_atom(Parser *p, int line)
@@ -415,10 +408,28 @@ static Node *parse_call_atom(Parser *p, int line)
         return NULL;
     }
 
+    if (match_word(p, "以")) {
+        Node *arg = parse_expr(p);
+
+        if (!arg) {
+            ast_free(node);
+            return NULL;
+        }
+        node_call_append_arg(node, arg);
+        while (match_word(p, "及")) {
+            arg = parse_expr(p);
+            if (!arg) {
+                ast_free(node);
+                return NULL;
+            }
+            node_call_append_arg(node, arg);
+        }
+    }
+
     return node;
 }
 
-static Node *parse_atom(Parser *p)
+static Node *parse_primary(Parser *p)
 {
     const Token *tok = peek(p);
     Node *node;
@@ -433,6 +444,15 @@ static Node *parse_atom(Parser *p)
 
     if (match_word(p, "用")) {
         return parse_call_atom(p, tok->line);
+    }
+
+    if (match_word(p, "夫")) {
+        node = parse_expr(p);
+        if (!node || !expect_word(p, "者", "者")) {
+            ast_free(node);
+            return NULL;
+        }
+        return node;
     }
 
     if (has_ident_until(p, p->pos, "術")) {
@@ -450,26 +470,33 @@ static Node *parse_atom(Parser *p)
     return NULL;
 }
 
-static Node *parse_expr(Parser *p)
+static int has_binary_tail(Parser *p)
 {
-    Node *lhs = parse_atom(p);
+    Parser probe = *p;
+    Node *rhs;
+
+    probe.error = NULL;
+    if (match_word(&probe, "與")) {
+        rhs = parse_primary(&probe);
+    } else {
+        rhs = parse_primary(&probe);
+    }
+    if (!rhs || !match_word(&probe, "之")) {
+        ast_free(rhs);
+        return 0;
+    }
+    ast_free(rhs);
+    return is_expr_op((TokType)op_at(&probe, probe.pos));
+}
+
+static Node *parse_binary_tail(Parser *p, Node *lhs)
+{
     Node *rhs;
     Node *node;
-    int has_with;
     int op;
 
-    if (!lhs) {
-        return NULL;
-    }
-
-    if (!has_expr_tail(p, &has_with)) {
-        return lhs;
-    }
-    if (has_with) {
-        match_word(p, "與");
-    }
-
-    rhs = parse_atom(p);
+    match_word(p, "與");
+    rhs = parse_primary(p);
     if (!rhs) {
         ast_free(lhs);
         return NULL;
@@ -491,12 +518,110 @@ static Node *parse_expr(Parser *p)
     return node;
 }
 
+static int is_explicit_arithmetic(Parser *p)
+{
+    Parser probe = *p;
+    Node *first;
+
+    probe.error = NULL;
+    if (!match_word(&probe, "以")) {
+        return 0;
+    }
+    first = parse_primary(&probe);
+    if (!first) {
+        return 0;
+    }
+    ast_free(first);
+    return is_word_at(&probe, "減") || is_word_at(&probe, "爲") ||
+           is_word_at(&probe, "為");
+}
+
+static Node *parse_explicit_arithmetic(Parser *p)
+{
+    Node *first;
+    Node *second;
+    Node *node;
+    int op;
+    int line = peek(p)->line;
+
+    expect_word(p, "以", "以");
+    first = parse_primary(p);
+    if (!first) {
+        return NULL;
+    }
+
+    if (match_word(p, "減")) {
+        op = T_DIFF;
+    } else {
+        if (!match_word(p, "爲") && !match_word(p, "為")) {
+            ast_free(first);
+            fail(p, peek(p)->line, "闕減若爲法");
+            return NULL;
+        }
+        if (!expect_word(p, "法", "法") || !expect_word(p, "除", "除")) {
+            ast_free(first);
+            return NULL;
+        }
+        op = -1;
+    }
+
+    second = parse_primary(p);
+    if (!second || !expect_word(p, "所得", "所得") ||
+        !expect_word(p, "之", "之")) {
+        ast_free(first);
+        ast_free(second);
+        return NULL;
+    }
+
+    if (op == T_DIFF) {
+        if (!expect_word(p, "差", "差")) {
+            ast_free(first);
+            ast_free(second);
+            return NULL;
+        }
+    } else if (match_word(p, "商")) {
+        op = T_QUOT;
+    } else if (match_word(p, "餘")) {
+        op = T_REM;
+    } else {
+        ast_free(first);
+        ast_free(second);
+        fail(p, peek(p)->line, "闕商若餘");
+        return NULL;
+    }
+
+    node = node_new(N_BINEXPR, line);
+    node->lhs = second;
+    node->rhs = first;
+    node->op = op;
+    node->line = line;
+    return node;
+}
+
+static Node *parse_expr(Parser *p)
+{
+    Node *lhs;
+
+    if (is_explicit_arithmetic(p)) {
+        return parse_explicit_arithmetic(p);
+    }
+
+    lhs = parse_primary(p);
+    if (!lhs) {
+        return NULL;
+    }
+    if (peek(p)->line == lhs->line && has_binary_tail(p)) {
+        return parse_binary_tail(p, lhs);
+    }
+    return lhs;
+}
+
 static Node *parse_divis(Parser *p)
 {
     static const char *rem_words[] = {"無", "有"};
     Node *node;
     Node *divisor;
-    int dividend;
+    Node *dividend_expr;
     int want_no_rem;
     int line = previous(p)->line;
 
@@ -505,7 +630,13 @@ static Node *parse_divis(Parser *p)
         return NULL;
     }
 
-    if (!expect_word(p, "除", "除") || !expect_var(p, &dividend)) {
+    if (!expect_word(p, "除", "除")) {
+        ast_free(divisor);
+        return NULL;
+    }
+
+    dividend_expr = parse_expr(p);
+    if (!dividend_expr) {
         ast_free(divisor);
         return NULL;
     }
@@ -517,17 +648,24 @@ static Node *parse_divis(Parser *p)
     } else {
         fail(p, peek(p)->line, "闕無餘若有餘");
         ast_free(divisor);
+        ast_free(dividend_expr);
         return NULL;
     }
 
     if (!expect_word(p, "餘", "餘")) {
         ast_free(divisor);
+        ast_free(dividend_expr);
         return NULL;
     }
 
     node = node_new(N_DIVIS, line);
     node->divisor = divisor;
-    node->dividend = dividend;
+    if (dividend_expr->kind == N_VAR) {
+        node->dividend = dividend_expr->var;
+        ast_free(dividend_expr);
+    } else {
+        node->dividend_expr = dividend_expr;
+    }
     node->want_no_rem = want_no_rem;
     return node;
 }
@@ -577,6 +715,7 @@ static Node *parse_compare(Parser *p)
         node->lhs = lhs;
         node->rhs = rhs;
         node->op = T_EQ;
+        match_word(p, "於");
         return node;
     }
 
@@ -602,6 +741,9 @@ static Node *parse_compare(Parser *p)
 
 static Node *parse_cond(Parser *p)
 {
+    if (is_explicit_arithmetic(p)) {
+        return parse_expr(p);
+    }
     if (match_word(p, "以")) {
         return parse_divis(p);
     }
@@ -629,6 +771,18 @@ static Node *parse_simple(Parser *p)
         }
         node->expr = parse_expr(p);
         if (!node->expr) {
+            ast_free(node);
+            return NULL;
+        }
+        return node;
+    }
+
+    if (match_word(p, "置")) {
+        Node *node = node_new(N_ASSIGN, tok->line);
+
+        node->expr = parse_expr(p);
+        if (!node->expr || !expect_word(p, "於", "於") ||
+            !expect_var(p, &node->var)) {
             ast_free(node);
             return NULL;
         }
@@ -678,6 +832,7 @@ static Node *parse_loop(Parser *p)
 {
     Node *node;
     const Token *tok = peek(p);
+    int v2_suite;
 
     if (!match_word(p, "凡")) {
         return NULL;
@@ -701,9 +856,12 @@ static Node *parse_loop(Parser *p)
         return NULL;
     }
     match_word(p, "者");
+    v2_suite = match_word(p, "各行");
 
-    node->body = parse_block_until(p, is_loop_end);
-    if (!node->body || !expect_word(p, "焉", "焉")) {
+    node->body = v2_suite
+        ? parse_suite(p, is_loop_end, tok->line, tok->col)
+        : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
+    if (!node->body || (!v2_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
         return NULL;
     }
@@ -716,6 +874,7 @@ static Node *parse_while(Parser *p)
     static const char *while_words[] = {"當", "方"};
     Node *node;
     const Token *tok = peek(p);
+    int v2_suite;
 
     if (!match_any_word(p, while_words, 2)) {
         return NULL;
@@ -728,8 +887,11 @@ static Node *parse_while(Parser *p)
         return NULL;
     }
 
-    node->body = parse_block_until(p, is_loop_end);
-    if (!node->body || !expect_word(p, "焉", "焉")) {
+    v2_suite = match_word(p, "時復行");
+    node->body = v2_suite
+        ? parse_suite(p, is_loop_end, tok->line, tok->col)
+        : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
+    if (!node->body || (!v2_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
         return NULL;
     }
@@ -750,6 +912,7 @@ static Node *parse_ifchain(Parser *p)
     Node *cond;
     Node *then_block;
     const Token *tok = peek(p);
+    int v2_suite = 0;
 
     if (!match_word(p, "若")) {
         return NULL;
@@ -767,7 +930,12 @@ static Node *parse_ifchain(Parser *p)
         return NULL;
     }
 
-    then_block = parse_block_until(p, is_if_body_stop);
+    if (peek(p)->line > tok->line && peek(p)->col > tok->col) {
+        v2_suite = 1;
+    }
+    then_block = v2_suite
+        ? parse_suite(p, is_if_body_stop, tok->line, tok->col)
+        : parse_block_until(p, is_if_body_stop, tok->line, tok->col, 0);
     if (!then_block) {
         ast_free(cond);
         ast_free(node);
@@ -777,6 +945,8 @@ static Node *parse_ifchain(Parser *p)
 
     while (is_else(p)) {
         static const char *else_words[] = {"不然", "否則"};
+        const Token *else_tok = peek(p);
+        int branch_v2;
 
         match_any_word(p, else_words, 2);
         if (match_word(p, "若")) {
@@ -791,7 +961,13 @@ static Node *parse_ifchain(Parser *p)
                 return NULL;
             }
 
-            then_block = parse_block_until(p, is_if_body_stop);
+            branch_v2 = peek(p)->line > else_tok->line &&
+                        peek(p)->col > else_tok->col;
+            v2_suite = v2_suite || branch_v2;
+            then_block = branch_v2
+                ? parse_suite(p, is_if_body_stop, else_tok->line, else_tok->col)
+                : parse_block_until(p, is_if_body_stop,
+                                    else_tok->line, else_tok->col, 0);
             if (!then_block) {
                 ast_free(cond);
                 ast_free(node);
@@ -801,7 +977,13 @@ static Node *parse_ifchain(Parser *p)
             continue;
         }
 
-        node->els = parse_block_until(p, is_if_end);
+        branch_v2 = peek(p)->line > else_tok->line &&
+                    peek(p)->col > else_tok->col;
+        v2_suite = v2_suite || branch_v2;
+        node->els = branch_v2
+            ? parse_suite(p, is_if_end, else_tok->line, else_tok->col)
+            : parse_block_until(p, is_if_end,
+                                else_tok->line, else_tok->col, 0);
         if (!node->els) {
             ast_free(node);
             return NULL;
@@ -809,7 +991,11 @@ static Node *parse_ifchain(Parser *p)
         break;
     }
 
-    if (!expect_if_end(p)) {
+    if (v2_suite) {
+        if (is_if_end(p)) {
+            expect_if_end(p);
+        }
+    } else if (!expect_if_end(p)) {
         ast_free(node);
         return NULL;
     }
@@ -830,6 +1016,7 @@ static Node *parse_function(Parser *p)
     Node *node;
     const Token *tok = peek(p);
     int saw_param;
+    int v2_return;
 
     if (!match_word(p, "夫")) {
         return NULL;
@@ -859,6 +1046,14 @@ static Node *parse_function(Parser *p)
             expect_var(p, &var);
             node_func_append_param(node, var, line);
             saw_param = 1;
+            if (!match_word(p, "及")) {
+                continue;
+            }
+            if (!expect_var(p, &var)) {
+                ast_free(node);
+                return NULL;
+            }
+            node_func_append_param(node, var, line);
         }
         if (!saw_param) {
             fail(p, peek(p)->line, "闕受之天干");
@@ -867,14 +1062,21 @@ static Node *parse_function(Parser *p)
         }
     }
 
-    node->body = parse_block_until(p, is_return_stop);
-    if (!node->body || !expect_any_word(p, return_words, 2, "歸")) {
+    node->body = parse_block_until(
+        p, is_return_stop, tok->line, tok->col,
+        peek(p)->line > tok->line && peek(p)->col > tok->col);
+    if (!node->body) {
         ast_free(node);
         return NULL;
     }
 
+    v2_return = match_word(p, "乃得");
+    if (!v2_return && !expect_any_word(p, return_words, 2, "歸")) {
+        ast_free(node);
+        return NULL;
+    }
     node->expr = parse_expr(p);
-    if (!node->expr || !expect_func_end(p)) {
+    if (!node->expr || (!v2_return && !expect_func_end(p))) {
         ast_free(node);
         return NULL;
     }
@@ -896,7 +1098,7 @@ static Node *parse_item(Parser *p)
     if (is_word_at(p, "夫")) {
         return parse_function(p);
     }
-    if (is_word_at(p, "令") || is_word_at(p, "使") ||
+    if (is_word_at(p, "令") || is_word_at(p, "使") || is_word_at(p, "置") ||
         is_word_at(p, "曰") || is_word_at(p, "書") ||
         is_word_at(p, "用") || is_word_at(p, "行") ||
         has_ident_until(p, p->pos, "術")) {
@@ -917,7 +1119,7 @@ Node *parse_program(const Token *tokens, int count, char **error)
     p.pos = 0;
     p.error = NULL;
 
-    program = parse_block_until(&p, is_eof_stop);
+    program = parse_block_until(&p, is_eof_stop, 0, 0, 0);
     if (program && peek(&p)->type != T_EOF) {
         ast_free(program);
         program = NULL;

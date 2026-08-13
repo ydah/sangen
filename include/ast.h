@@ -30,10 +30,13 @@ struct Node {
     Node *lhs;
     Node *rhs;
     Node *divisor;
+    Node *dividend_expr;
     int dividend;
     int want_no_rem;
     char *str;
     char *name;
+    Node **args;
+    int nargs;
     Node *expr;
     Node *from;
     Node *to;
@@ -54,6 +57,7 @@ Node *node_new(NodeKind kind, int line);
 void node_block_append(Node *block, Node *stmt);
 void node_if_append_branch(Node *node, Node *cond, Node *then_block);
 void node_func_append_param(Node *node, int var, int line);
+void node_call_append_arg(Node *node, Node *arg);
 void ast_print(const Node *node);
 void ast_free(Node *node);
 

@@ -99,6 +99,7 @@ static void emit_var_expr(const Node *node, FILE *out)
 static void emit_call_expr(const Node *node, FILE *out, const EmitCtx *ctx)
 {
     int index = func_index(ctx, node->name ? node->name : "");
+    int i;
 
     if (index < 0) {
         fputs("missing_func(", out);
@@ -111,6 +112,18 @@ static void emit_call_expr(const Node *node, FILE *out, const EmitCtx *ctx)
 
     fprintf(out, "fn%d(v, d, ", index);
     emit_line_label(out, node->line);
+    if (node->nargs == 0) {
+        fputs(", NULL, 0", out);
+    } else {
+        fputs(", (long[]){", out);
+        for (i = 0; i < node->nargs; i++) {
+            if (i > 0) {
+                fputs(", ", out);
+            }
+            emit_expr(node->args[i], out, ctx);
+        }
+        fprintf(out, "}, %d", node->nargs);
+    }
     fputc(')', out);
 }
 
@@ -190,11 +203,18 @@ static void emit_compare(const Node *node, FILE *out, const EmitCtx *ctx)
 
 static void emit_divis(const Node *node, FILE *out, const EmitCtx *ctx)
 {
-    fprintf(out, "divisible(require_var(d[%d], v[%d], ", node->dividend, node->dividend);
-    emit_c_string(out, var_name(node->dividend));
-    fputs(", ", out);
-    emit_line_label(out, node->line);
-    fputs("), ", out);
+    if (node->dividend_expr) {
+        fputs("divisible(", out);
+        emit_expr(node->dividend_expr, out, ctx);
+        fputs(", ", out);
+    } else {
+        fprintf(out, "divisible(require_var(d[%d], v[%d], ",
+                node->dividend, node->dividend);
+        emit_c_string(out, var_name(node->dividend));
+        fputs(", ", out);
+        emit_line_label(out, node->line);
+        fputs("), ", out);
+    }
     emit_expr(node->divisor, out, ctx);
     fprintf(out, ", %d, ", node->want_no_rem);
     emit_line_label(out, node->line);
@@ -425,7 +445,7 @@ static void emit_prototypes(FILE *out, const EmitCtx *ctx)
 
     for (i = 0; i < ctx->program->nstmt; i++) {
         if (ctx->program->stmts[i]->kind == N_FUNC) {
-            fprintf(out, "long fn%d(long caller_v[10], int caller_d[10], const char *call_line);\n", index++);
+            fprintf(out, "long fn%d(long caller_v[10], int caller_d[10], const char *call_line, const long *call_args, int call_nargs);\n", index++);
         }
     }
 
@@ -439,17 +459,29 @@ static void emit_function(FILE *out, const Node *func, int index, const EmitCtx 
     int i;
     int temp_id = 0;
 
-    fprintf(out, "long fn%d(long caller_v[10], int caller_d[10], const char *call_line) {\n", index);
+    fprintf(out, "long fn%d(long caller_v[10], int caller_d[10], const char *call_line, const long *call_args, int call_nargs) {\n", index);
     fputs("    long v[10] = {0};\n", out);
     fputs("    int d[10] = {0};\n", out);
-    fputs("    (void)caller_v; (void)caller_d; (void)v; (void)d;\n", out);
+    fputs("    (void)caller_v; (void)caller_d; (void)call_args; (void)call_nargs; (void)v; (void)d;\n", out);
 
     for (i = 0; i < func->nparam; i++) {
         int var = func->params[i];
         indent(out, 1);
+        fprintf(out, "if (call_nargs > 0) {\n");
+        indent(out, 2);
+        fprintf(out, "if (call_nargs != %d) runtime_error_at(call_line, \"實參數不合\");\n", func->nparam);
+        indent(out, 2);
+        fprintf(out, "v[%d] = call_args[%d];\n", var, i);
+        indent(out, 2);
+        fprintf(out, "d[%d] = 1;\n", var);
+        indent(out, 1);
+        fputs("} else {\n", out);
+        indent(out, 2);
         fprintf(out, "v[%d] = require_var(caller_d[%d], caller_v[%d], ", var, var, var);
         emit_c_string(out, var_name(var));
         fprintf(out, ", call_line); d[%d] = 1;\n", var);
+        indent(out, 1);
+        fputs("}\n", out);
     }
 
     emit_block(func->body, out, 1, &temp_id, ctx);

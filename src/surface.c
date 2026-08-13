@@ -4,11 +4,23 @@
 #include <string.h>
 
 #include "message.h"
+#include "numeral.h"
 #include "support.h"
 
 static int is_han(const Token *token)
 {
     return token && token->type == T_HAN;
+}
+
+static int is_punctuation(const Token *token)
+{
+    return token && token->type == T_PUNCT;
+}
+
+static int is_hard_punctuation(const Token *token)
+{
+    return is_punctuation(token) &&
+           (token->lval == 0x3002 || token->lval == 0xFF1B);
 }
 
 static const char *split_words[] = {
@@ -93,6 +105,8 @@ static int validate_mark(const TokenArray *raw, int raw_index,
 {
     int before_index = raw_index - 1;
     int after_index = raw_index + 1;
+    int before_hard = 0;
+    int after_hard = 0;
     const Token *before;
     const Token *after;
 
@@ -105,13 +119,25 @@ static int validate_mark(const TokenArray *raw, int raw_index,
     if (after_index < raw->count && raw->data[after_index].type == T_KAERI_RE) {
         return 1;
     }
+
+    while (before_index >= 0 && is_punctuation(&raw->data[before_index])) {
+        before_hard = before_hard || is_hard_punctuation(&raw->data[before_index]);
+        before_index--;
+    }
+    while (after_index < raw->count && is_punctuation(&raw->data[after_index])) {
+        after_hard = after_hard || is_hard_punctuation(&raw->data[after_index]);
+        after_index++;
+    }
+    if (before_index < 0) {
+        return mark_fail(&raw->data[raw_index], "返點無所承", error);
+    }
     if (after_index >= raw->count || raw->data[after_index].type == T_EOF) {
         return mark_fail(&raw->data[raw_index], "返點無所先", error);
     }
 
     before = &raw->data[before_index];
     after = &raw->data[after_index];
-    if (before->line != after->line) {
+    if (before_hard || after_hard || before->line != after->line) {
         return mark_fail(&raw->data[raw_index], "返點越句", error);
     }
     if (before->type == T_NUMBER && after->type == T_NUMBER) {
@@ -164,6 +190,7 @@ int surface_build(const TokenArray *raw, SurfaceStream *surface, char **error)
 
         if (token->type == T_KAERI_RE) {
             SourceMark mark;
+            int j;
 
             memset(&mark, 0, sizeof(mark));
             mark.kind = MARK_KAERI_RE;
@@ -174,11 +201,21 @@ int surface_build(const TokenArray *raw, SurfaceStream *surface, char **error)
             mark.span.line = token->line;
             mark.span.col = token->col;
             mark.spelling = token->spelling;
+            for (j = 0; j < surface->mark_count; j++) {
+                if (surface->marks[j].boundary == boundary) {
+                    surface_free(surface);
+                    return mark_fail(token, "返點重出", error);
+                }
+            }
             if (!validate_mark(raw, i, &mark, error)) {
                 surface_free(surface);
                 return 0;
             }
             append_mark(surface, token, i, boundary);
+            continue;
+        }
+
+        if (token->type == T_PUNCT) {
             continue;
         }
 
@@ -207,4 +244,58 @@ void surface_free(SurfaceStream *surface)
 int surface_has_marks(const SurfaceStream *surface)
 {
     return surface && surface->mark_count > 0;
+}
+
+static void print_legacy_string(FILE *out, const char *text)
+{
+    const char *p = text ? text : "";
+
+    fputs("辭曰", out);
+    while (*p) {
+        if (strncmp(p, "辭畢", strlen("辭畢")) == 0) {
+            fputs("辭畢辭畢", out);
+            p += strlen("辭畢");
+            continue;
+        }
+        fputc((unsigned char)*p, out);
+        p++;
+    }
+    fputs("辭畢", out);
+}
+
+void surface_print_normalized(const TokenArray *raw, FILE *out)
+{
+    int i;
+    int indent;
+    int previous_line = 0;
+
+    for (i = 0; i < raw->count; i++) {
+        const Token *token = &raw->data[i];
+
+        if (token->type == T_EOF) {
+            break;
+        }
+        if (previous_line != 0 && token->line > previous_line) {
+            fputc('\n', out);
+        }
+        if (token->line > previous_line) {
+            for (indent = 1; indent < token->col; indent++) {
+                fputs("　", out);
+            }
+        }
+        previous_line = token->line;
+
+        if (token->type == T_KAERI_RE) {
+            fputs("㆑", out);
+        } else if (token->type == T_STRING) {
+            print_legacy_string(out, token->sval);
+        } else if (token->type == T_NUMBER) {
+            char number[128];
+            sangen_number_label(token->lval, number, sizeof(number));
+            fputs(number, out);
+        } else if (token->sval) {
+            fputs(token->sval, out);
+        }
+    }
+    fputc('\n', out);
 }

@@ -99,6 +99,7 @@ static long call_func(Node *call, Env *env)
 {
     Node *func = find_func(env, call->name ? call->name : "");
     Env local;
+    long *args = NULL;
     int i;
 
     if (!func) {
@@ -112,14 +113,37 @@ static long call_func(Node *call, Env *env)
     local.funcs = env->funcs;
     local.nfunc = env->nfunc;
 
+    if (call->nargs > 0) {
+        if (call->nargs != func->nparam) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "術%s實參數不合",
+                     call->name ? call->name : "");
+            runtime_error_at(env, call->line, msg);
+            return 0;
+        }
+        args = sangen_xmalloc(sizeof(long) * (size_t)call->nargs);
+        for (i = 0; i < call->nargs; i++) {
+            args[i] = eval(call->args[i], env);
+            if (env->failed) {
+                free(args);
+                return 0;
+            }
+        }
+    }
+
     for (i = 0; i < func->nparam; i++) {
         int var = func->params[i];
-        local.vars[var] = require_var(env, var, call->line);
+
+        local.vars[var] = call->nargs > 0
+            ? args[i]
+            : require_var(env, var, call->line);
         if (env->failed) {
+            free(args);
             return 0;
         }
         local.defined[var] = 1;
     }
+    free(args);
 
     exec(func->body, &local);
     if (!local.failed) {
@@ -236,7 +260,9 @@ static long eval_binexpr(Node *e, Env *env)
 static long eval_divis(Node *e, Env *env)
 {
     long divisor = eval(e->divisor, env);
-    long dividend = require_var(env, e->dividend, e->line);
+    long dividend = e->dividend_expr
+        ? eval(e->dividend_expr, env)
+        : require_var(env, e->dividend, e->line);
     int no_rem;
 
     if (env->failed) {

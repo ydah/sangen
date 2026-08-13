@@ -68,6 +68,10 @@ run_case string
 run_case compat
 run_case context
 run_case reten
+run_case v2
+run_case reten_compat
+./sangen examples/reten_compat.kbn --校=訓點 > test/.actual_reten_compat_lint.txt
+diff -u test/expected/debug/reten_compat_lint.txt test/.actual_reten_compat_lint.txt
 
 ./sangen examples/fizzbuzz.kbn --詞 > test/.actual_fizzbuzz_tokens.txt
 diff -u test/expected/debug/fizzbuzz_tokens.txt test/.actual_fizzbuzz_tokens.txt
@@ -90,6 +94,8 @@ diff -u test/expected/compat.txt test/.actual_compat_rewrite_out.txt
 diff -u test/expected/debug/reten_tokens.txt test/.actual_reten_tokens.txt
 ./sangen examples/reten.kbn --讀順 > test/.actual_reten_reading.txt
 diff -u test/expected/debug/reten_reading.txt test/.actual_reten_reading.txt
+./sangen examples/reten.kbn --整=表記 > test/.actual_reten_surface.kbn
+diff -u test/expected/debug/reten_surface.kbn test/.actual_reten_surface.kbn
 
 if ./sangen examples/reten.kbn --整 > test/.actual_reten_rewrite.kbn 2> test/.actual_reten_rewrite_err.txt; then
     echo "expected 整 failure: reten" >&2
@@ -112,9 +118,12 @@ run_error reten_no_before
 run_error reten_no_after
 run_error reten_duplicate
 run_error reten_cross_line
+run_error reten_punct_boundary
 run_error reten_number_split
 run_error reten_word_split
 run_error reten_name_split
+run_error v2_arg_count
+run_error quoted_string
 run_error undefined_func
 run_error unclosed_text
 run_error unclosed_note
