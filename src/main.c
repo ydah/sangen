@@ -10,6 +10,7 @@
 #include "message.h"
 #include "parser.h"
 #include "reading.h"
+#include "support.h"
 #include "surface.h"
 #include "utf8.h"
 
@@ -144,13 +145,19 @@ static int word_len_at(const TokenArray *tokens, int pos, const char *word)
     size_t wpos = 0;
     size_t wlen = strlen(word);
     int n = 0;
+    int line;
+
+    if (pos < 0 || pos >= tokens->count) {
+        return 0;
+    }
+    line = tokens->data[pos].line;
 
     while (wpos < wlen) {
         uint32_t want;
         uint32_t got;
         size_t step = utf8_next((const unsigned char *)word, wlen, wpos, &want);
 
-        if (pos + n >= tokens->count ||
+        if (pos + n >= tokens->count || tokens->data[pos + n].line != line ||
             step == 0 ||
             !token_cp(&tokens->data[pos + n], &got) ||
             got != want) {
@@ -169,33 +176,12 @@ static int is_word_at(const TokenArray *tokens, int pos, const char *word)
     return word_len_at(tokens, pos, word) > 0;
 }
 
-static int var_at(const TokenArray *tokens, int pos)
-{
-    static const uint32_t vars[] = {
-        0x7532, 0x4E59, 0x4E19, 0x4E01, 0x620A,
-        0x5DF1, 0x5E9A, 0x8F9B, 0x58EC, 0x7678
-    };
-    uint32_t cp;
-    int i;
-
-    if (!token_cp(&tokens->data[pos], &cp)) {
-        return 0;
-    }
-
-    for (i = 0; i < 10; i++) {
-        if (cp == vars[i]) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
 static int with_eq_form(const TokenArray *tokens, int pos)
 {
     int i;
 
-    for (i = pos - 1; i >= 0 && tokens->data[i].type != T_EOF; i--) {
+    for (i = pos - 1; i >= 0 && tokens->data[i].type != T_EOF &&
+         tokens->data[i].line == tokens->data[pos].line; i--) {
         if (is_word_at(tokens, i, "與")) {
             return 1;
         }
@@ -208,7 +194,69 @@ static int with_eq_form(const TokenArray *tokens, int pos)
     return 0;
 }
 
-static int call_has_use_prefix(const TokenArray *tokens, int proc_pos)
+static int same_han_token(const Token *lhs, const Token *rhs)
+{
+    return lhs->type == T_HAN && rhs->type == T_HAN &&
+           lhs->sval && rhs->sval && strcmp(lhs->sval, rhs->sval) == 0;
+}
+
+static void mark_proc_name_tokens(const TokenArray *tokens,
+                                  unsigned char *proc_names,
+                                  unsigned char *proc_calls)
+{
+    int decl;
+
+    for (decl = 0; decl < tokens->count; decl++) {
+        int end;
+        int name_len;
+        int call;
+
+        if (!is_word_at(tokens, decl, "夫")) {
+            continue;
+        }
+        end = decl + 1;
+        while (end < tokens->count &&
+               tokens->data[end].line == tokens->data[decl].line &&
+               !is_word_at(tokens, end, "者")) {
+            end++;
+        }
+        if (end == decl + 1 || !is_word_at(tokens, end, "者") ||
+            !is_word_at(tokens, end + 1, "術") ||
+            !is_word_at(tokens, end + 2, "也")) {
+            continue;
+        }
+        for (call = decl + 1; call < end; call++) {
+            proc_names[call] = 1;
+        }
+
+        name_len = end - decl - 1;
+        for (call = 0; call + name_len < tokens->count; call++) {
+            int j;
+
+            for (j = 0; j < name_len; j++) {
+                if (!same_han_token(&tokens->data[call + j],
+                                    &tokens->data[decl + 1 + j])) {
+                    break;
+                }
+            }
+            if (j == name_len &&
+                is_word_at(tokens, call + name_len, "術")) {
+                int call_end = call + name_len;
+
+                for (j = 0; j < name_len; j++) {
+                    proc_names[call + j] = 1;
+                }
+                proc_calls[call_end] |= 1;
+                if (call > 0 && is_word_at(tokens, call - 1, "用")) {
+                    proc_calls[call_end] |= 2;
+                }
+            }
+        }
+    }
+}
+
+static int call_has_use_prefix(const TokenArray *tokens,
+                               const unsigned char *proc_calls, int proc_pos)
 {
     int i;
 
@@ -219,17 +267,19 @@ static int call_has_use_prefix(const TokenArray *tokens, int proc_pos)
         return 1;
     }
 
-    for (i = proc_pos - 1; i >= 0 && tokens->data[i].type == T_HAN; i--) {
+    if (proc_calls[proc_pos] & 1) {
+        return (proc_calls[proc_pos] & 2) != 0;
+    }
+
+    for (i = proc_pos - 1; i >= 0 &&
+         tokens->data[i].line == tokens->data[proc_pos].line; i--) {
+        if (is_word_at(tokens, i, "術")) {
+            return 0;
+        }
         if (is_word_at(tokens, i, "用")) {
             return 1;
         }
-        if (is_word_at(tokens, i, "若") || is_word_at(tokens, i, "則") ||
-            is_word_at(tokens, i, "不然") || is_word_at(tokens, i, "否則") ||
-            is_word_at(tokens, i, "夫") || is_word_at(tokens, i, "受")) {
-            break;
-        }
     }
-
     return 0;
 }
 
@@ -246,6 +296,12 @@ static int lint_kanbun(const TokenArray *tokens, FILE *out, LintMode mode)
 {
     int issues = 0;
     int i;
+    unsigned char *proc_names = sangen_xmalloc((size_t)tokens->count);
+    unsigned char *proc_calls = sangen_xmalloc((size_t)tokens->count);
+
+    memset(proc_names, 0, (size_t)tokens->count);
+    memset(proc_calls, 0, (size_t)tokens->count);
+    mark_proc_name_tokens(tokens, proc_names, proc_calls);
 
     for (i = 0; i < tokens->count && tokens->data[i].type != T_EOF; i++) {
         if (tokens->data[i].type == T_KAERI_RE) {
@@ -254,6 +310,10 @@ static int lint_kanbun(const TokenArray *tokens, FILE *out, LintMode mode)
                 issues += report_kanbun_issue(
                     out, &tokens->data[i], "此乃片假名 宜用返點「㆑」");
             }
+            continue;
+        }
+
+        if (proc_names[i]) {
             continue;
         }
 
@@ -300,28 +360,31 @@ static int lint_kanbun(const TokenArray *tokens, FILE *out, LintMode mode)
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜曰「等於」");
         } else if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
-                   is_word_at(tokens, i, "行")) {
+                   is_word_at(tokens, i, "行") &&
+                   !(i > 0 && (is_word_at(tokens, i - 1, "各行") ||
+                               is_word_at(tokens, i - 1, "復行")))) {
             issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此非正格 宜冠「用」而省「行」");
         }
 
         if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
-            is_word_at(tokens, i, "除") &&
-            i + 2 < tokens->count &&
-            var_at(tokens, i + 1) &&
-            (is_word_at(tokens, i + 2, "無") ||
-             is_word_at(tokens, i + 2, "有"))) {
-            issues += report_kanbun_issue(out, &tokens->data[i + 2],
+            (is_word_at(tokens, i, "無") || is_word_at(tokens, i, "有")) &&
+            is_word_at(tokens, i + 1, "餘") &&
+            !(i > 0 && is_word_at(tokens, i - 1, "而"))) {
+            issues += report_kanbun_issue(out, &tokens->data[i],
                                            "此處宜加「而」");
         }
 
         if ((mode == LINT_ALL || mode == LINT_GRAMMAR) &&
-            is_word_at(tokens, i, "術") && !call_has_use_prefix(tokens, i)) {
-            issues += report_kanbun_issue(out, &tokens->data[i - 1],
+            is_word_at(tokens, i, "術") &&
+            !call_has_use_prefix(tokens, proc_calls, i)) {
+            issues += report_kanbun_issue(out, &tokens->data[i > 0 ? i - 1 : i],
                                            "術之用未明 宜冠「用」");
         }
     }
 
+    free(proc_names);
+    free(proc_calls);
     return issues;
 }
 
@@ -335,6 +398,25 @@ static void format_indent(FILE *out, int depth)
 }
 
 static void format_expr(FILE *out, const Node *node);
+
+static int format_expr_needs_group(const Node *node)
+{
+    return node && (node->kind == N_BINEXPR ||
+                    (node->kind == N_CALL && node->nargs > 0));
+}
+
+static void format_grouped_expr(FILE *out, const Node *node)
+{
+    int grouped = format_expr_needs_group(node);
+
+    if (grouped) {
+        fputs("夫", out);
+    }
+    format_expr(out, node);
+    if (grouped) {
+        fputs("者", out);
+    }
+}
 
 static void format_string(FILE *out, const char *s)
 {
@@ -355,6 +437,8 @@ static void format_string(FILE *out, const char *s)
 
 static void format_expr(FILE *out, const Node *node)
 {
+    int i;
+
     if (!node) {
         return;
     }
@@ -372,10 +456,21 @@ static void format_expr(FILE *out, const Node *node)
         break;
     case N_CALL:
         fprintf(out, "用%s術", node->name ? node->name : "");
+        for (i = 0; i < node->nargs; i++) {
+            fputs(i == 0 ? "以" : "及", out);
+            if (node->args[i]->kind == N_CALL && node->args[i]->nargs > 0) {
+                fputs("夫", out);
+                format_expr(out, node->args[i]);
+                fputs("者", out);
+            } else {
+                format_expr(out, node->args[i]);
+            }
+        }
         break;
     case N_BINEXPR:
-        format_expr(out, node->lhs);
-        format_expr(out, node->rhs);
+        format_grouped_expr(out, node->lhs);
+        fputs("與", out);
+        format_grouped_expr(out, node->rhs);
         fputs("之", out);
         fputs(op_name(node->op), out);
         break;
@@ -393,15 +488,45 @@ static void format_expr(FILE *out, const Node *node)
     case N_DIVIS:
         fputs("以", out);
         format_expr(out, node->divisor);
-        fprintf(out, "除%s而%s餘", var_name(node->dividend),
-                node->want_no_rem ? "無" : "有");
+        fputs("除", out);
+        if (node->dividend_expr) {
+            format_expr(out, node->dividend_expr);
+        } else {
+            fputs(var_name(node->dividend), out);
+        }
+        fprintf(out, "而%s餘", node->want_no_rem ? "無" : "有");
         break;
     default:
         break;
     }
 }
 
+static void format_cond(FILE *out, const Node *node)
+{
+    if (!node || node->kind != N_BINEXPR ||
+        (node->op != T_DIFF && node->op != T_QUOT && node->op != T_REM)) {
+        format_expr(out, node);
+        return;
+    }
+
+    fputs("以", out);
+    format_grouped_expr(out, node->rhs);
+    if (node->op == T_DIFF) {
+        fputs("減", out);
+    } else {
+        fputs("爲法除", out);
+    }
+    format_grouped_expr(out, node->lhs);
+    fputs("所得之", out);
+    fputs(op_name(node->op), out);
+}
+
 static void format_block(FILE *out, const Node *block, int depth);
+
+static int block_is_empty(const Node *block)
+{
+    return block && block->kind == N_BLOCK && block->nstmt == 0;
+}
 
 static void format_stmt(FILE *out, const Node *node, int depth)
 {
@@ -414,8 +539,9 @@ static void format_stmt(FILE *out, const Node *node, int depth)
     switch (node->kind) {
     case N_ASSIGN:
         format_indent(out, depth);
-        fprintf(out, "令%s爲", var_name(node->var));
+        fputs("置", out);
         format_expr(out, node->expr);
+        fprintf(out, "於%s", var_name(node->var));
         fputs("\n", out);
         break;
     case N_SAY:
@@ -432,7 +558,8 @@ static void format_stmt(FILE *out, const Node *node, int depth)
         break;
     case N_CALL:
         format_indent(out, depth);
-        fprintf(out, "用%s術\n", node->name ? node->name : "");
+        format_expr(out, node);
+        fputs("\n", out);
         break;
     case N_FOR:
         format_indent(out, depth);
@@ -440,54 +567,58 @@ static void format_stmt(FILE *out, const Node *node, int depth)
         format_expr(out, node->from);
         fputs("至", out);
         format_expr(out, node->to);
-        fputs("者\n", out);
+        fputs("者各行\n", out);
         format_block(out, node->body, depth + 1);
-        format_indent(out, depth);
-        fputs("焉\n", out);
         break;
     case N_WHILE:
         format_indent(out, depth);
         fputs("當", out);
-        format_expr(out, node->expr);
-        fputs("\n", out);
+        format_cond(out, node->expr);
+        fputs("時復行\n", out);
         format_block(out, node->body, depth + 1);
-        format_indent(out, depth);
-        fputs("焉\n", out);
         break;
     case N_IF:
-        for (i = 0; i < node->nbranch; i++) {
-            format_indent(out, depth);
-            fputs(i == 0 ? "若" : "不然若", out);
-            format_expr(out, node->conds[i]);
-            fputs("則\n", out);
-            format_block(out, node->thens[i], depth + 1);
+        {
+            int needs_end = node->els && block_is_empty(node->els);
+
+            for (i = 0; i < node->nbranch; i++) {
+                needs_end = needs_end || block_is_empty(node->thens[i]);
+                format_indent(out, depth);
+                fputs(i == 0 ? "若" : "不然若", out);
+                format_cond(out, node->conds[i]);
+                fputs("則\n", out);
+                format_block(out, node->thens[i], depth + 1);
+            }
+            if (node->els) {
+                format_indent(out, depth);
+                fputs("不然\n", out);
+                format_block(out, node->els, depth + 1);
+            }
+            if (needs_end) {
+                format_indent(out, depth);
+                fputs("已矣\n", out);
+            }
         }
-        if (node->els) {
-            format_indent(out, depth);
-            fputs("不然\n", out);
-            format_block(out, node->els, depth + 1);
-        }
-        format_indent(out, depth);
-        fputs("已矣\n", out);
         break;
     case N_FUNC:
         format_indent(out, depth);
         fprintf(out, "夫%s者術也\n", node->name ? node->name : "");
         if (node->nparam > 0) {
-            format_indent(out, depth);
+            format_indent(out, depth + 1);
             fputs("受", out);
             for (i = 0; i < node->nparam; i++) {
+                if (i > 0) {
+                    fputs("及", out);
+                }
                 fputs(var_name(node->params[i]), out);
             }
             fputs("\n", out);
         }
-        format_block(out, node->body, depth);
-        format_indent(out, depth);
-        fputs("歸", out);
+        format_block(out, node->body, depth + 1);
+        format_indent(out, depth + 1);
+        fputs("乃得", out);
         format_expr(out, node->expr);
         fputs("\n", out);
-        format_indent(out, depth);
-        fputs("已矣\n", out);
         break;
     case N_BLOCK:
         format_block(out, node, depth);

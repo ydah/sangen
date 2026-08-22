@@ -90,13 +90,15 @@ static int word_len_at(Parser *p, int pos, const char *word)
     size_t wpos = 0;
     size_t wlen = strlen(word);
     int n = 0;
+    int line = token_at(p, pos)->line;
 
     while (wpos < wlen) {
         uint32_t want;
         uint32_t got;
         size_t step = utf8_next((const unsigned char *)word, wlen, wpos, &want);
 
-        if (step == 0 || !han_cp(token_at(p, pos + n), &got) || got != want) {
+        if (step == 0 || token_at(p, pos + n)->line != line ||
+            !han_cp(token_at(p, pos + n), &got) || got != want) {
             return 0;
         }
 
@@ -248,12 +250,114 @@ static int expect_ident_until(Parser *p, char **name, const char *stop)
     return 1;
 }
 
+static int is_statement_start_at(Parser *p, int pos)
+{
+    static const char *words[] = {
+        "凡", "當", "方", "若", "夫", "令", "使", "置",
+        "曰", "書", "用", "行"
+    };
+    int i;
+
+    for (i = 0; i < (int)(sizeof(words) / sizeof(words[0])); i++) {
+        if (word_len_at(p, pos, words[i]) > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int has_ident_spelling_until(Parser *p, int pos, const char *stop)
+{
+    int line = token_at(p, pos)->line;
+    int saw = 0;
+
+    while (token_at(p, pos)->type == T_HAN &&
+           token_at(p, pos)->line == line) {
+        if (word_len_at(p, pos, stop) > 0) {
+            return saw;
+        }
+        pos++;
+        saw = 1;
+    }
+    return 0;
+}
+
+static int declared_ident_until(Parser *p, int pos, const char *stop)
+{
+    int end = pos;
+    int line = token_at(p, pos)->line;
+    int decl;
+
+    while (token_at(p, end)->type == T_HAN &&
+           token_at(p, end)->line == line &&
+           word_len_at(p, end, stop) == 0) {
+        end++;
+    }
+    if (end == pos || word_len_at(p, end, stop) == 0) {
+        return 0;
+    }
+
+    for (decl = 0; decl < p->count; decl++) {
+        int name;
+        int i;
+
+        if (word_len_at(p, decl, "夫") == 0) {
+            continue;
+        }
+        name = decl + 1;
+        for (i = 0; pos + i < end; i++) {
+            const Token *want = token_at(p, pos + i);
+            const Token *got = token_at(p, name + i);
+
+            if (got->type != T_HAN || got->line != token_at(p, decl)->line ||
+                !want->sval || !got->sval ||
+                strcmp(want->sval, got->sval) != 0) {
+                break;
+            }
+        }
+        if (pos + i == end && word_len_at(p, name + i, "者") > 0 &&
+            word_len_at(p, name + i + 1, "術") > 0 &&
+            word_len_at(p, name + i + 2, "也") > 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int has_ident_until(Parser *p, int pos, const char *stop)
 {
+    int start = pos;
     int saw = 0;
     int line = token_at(p, pos)->line;
+    int var;
+    int starts_with_var = var_at(p, pos, &var);
 
     while (token_at(p, pos)->type == T_HAN && token_at(p, pos)->line == line) {
+        int then_len = word_len_at(p, pos, "則");
+
+        if (word_len_at(p, pos, "者") > 0) {
+            return 0;
+        }
+        if (starts_with_var && saw &&
+            declared_ident_until(p, pos, stop)) {
+            return declared_ident_until(p, start, stop);
+        }
+        if (starts_with_var && saw && then_len > 0 &&
+            (is_statement_start_at(p, pos + then_len) ||
+             has_ident_spelling_until(p, pos + then_len, stop))) {
+            return declared_ident_until(p, start, stop);
+        }
+        if (starts_with_var && saw && word_len_at(p, pos, "用") > 0 &&
+            (word_len_at(p, pos - 1, "夫") > 0 ||
+             word_len_at(p, pos - 1, "於") > 0 ||
+             word_len_at(p, pos - 1, "至") > 0 ||
+             word_len_at(p, pos - 1, "除") > 0 ||
+             word_len_at(p, pos - 1, "減") > 0 ||
+             word_len_at(p, pos - 1, "及") > 0 ||
+             word_len_at(p, pos - 1, "與") > 0)) {
+            return declared_ident_until(p, start, stop);
+        }
         if (word_len_at(p, pos, stop) > 0) {
             return saw;
         }
@@ -330,6 +434,11 @@ static int is_if_body_stop(Parser *p)
     return is_else(p) || is_if_end(p) || peek(p)->type == T_EOF;
 }
 
+static int is_if_else_body_stop(Parser *p)
+{
+    return is_if_end(p) || peek(p)->type == T_EOF;
+}
+
 static int is_return_stop(Parser *p)
 {
     return is_word_at(p, "歸") || is_word_at(p, "答") ||
@@ -396,6 +505,15 @@ static Node *parse_suite(Parser *p, StopFn stop, int line, int col)
 
     return parse_block_until(p, stop, line, col,
                              peek(p)->line > line && peek(p)->col > col);
+}
+
+static Node *parse_indented_suite(Parser *p, StopFn stop, int line, int col)
+{
+    if (peek(p)->line == line) {
+        return parse_suite(p, stop, line, col);
+    }
+
+    return parse_block_until(p, stop, line, col, 1);
 }
 
 static Node *parse_call_atom(Parser *p, int line)
@@ -470,23 +588,43 @@ static Node *parse_primary(Parser *p)
     return NULL;
 }
 
+static int is_expr_boundary(Parser *p)
+{
+    static const char *words[] = {
+        "之", "於", "至", "及", "除", "而", "減", "爲", "為",
+        "無", "有", "大", "過", "小", "不及", "等", "則", "者",
+        "所得", "各行", "時復行", "不然", "否則", "已矣", "畢",
+        "歸", "答", "乃得", "焉"
+    };
+    int i;
+
+    for (i = 0; i < (int)(sizeof(words) / sizeof(words[0])); i++) {
+        if (is_word_at(p, words[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int has_binary_tail(Parser *p)
 {
     Parser probe = *p;
     Node *rhs;
+    int result = 0;
+    int has_with;
 
     probe.error = NULL;
-    if (match_word(&probe, "與")) {
-        rhs = parse_primary(&probe);
-    } else {
-        rhs = parse_primary(&probe);
-    }
-    if (!rhs || !match_word(&probe, "之")) {
-        ast_free(rhs);
+    has_with = match_word(&probe, "與");
+    if (!has_with && is_expr_boundary(&probe)) {
         return 0;
     }
+    rhs = parse_primary(&probe);
+    if (rhs && match_word(&probe, "之")) {
+        result = is_expr_op((TokType)op_at(&probe, probe.pos));
+    }
     ast_free(rhs);
-    return is_expr_op((TokType)op_at(&probe, probe.pos));
+    free(probe.error);
+    return result;
 }
 
 static Node *parse_binary_tail(Parser *p, Node *lhs)
@@ -522,6 +660,7 @@ static int is_explicit_arithmetic(Parser *p)
 {
     Parser probe = *p;
     Node *first;
+    int result;
 
     probe.error = NULL;
     if (!match_word(&probe, "以")) {
@@ -529,11 +668,14 @@ static int is_explicit_arithmetic(Parser *p)
     }
     first = parse_primary(&probe);
     if (!first) {
+        free(probe.error);
         return 0;
     }
     ast_free(first);
-    return is_word_at(&probe, "減") || is_word_at(&probe, "爲") ||
-           is_word_at(&probe, "為");
+    result = is_word_at(&probe, "減") || is_word_at(&probe, "爲") ||
+             is_word_at(&probe, "為");
+    free(probe.error);
+    return result;
 }
 
 static Node *parse_explicit_arithmetic(Parser *p)
@@ -859,7 +1001,7 @@ static Node *parse_loop(Parser *p)
     indented_suite = match_word(p, "各行");
 
     node->body = indented_suite
-        ? parse_suite(p, is_loop_end, tok->line, tok->col)
+        ? parse_indented_suite(p, is_loop_end, tok->line, tok->col)
         : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
     if (!node->body || (!indented_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
@@ -889,7 +1031,7 @@ static Node *parse_while(Parser *p)
 
     indented_suite = match_word(p, "時復行");
     node->body = indented_suite
-        ? parse_suite(p, is_loop_end, tok->line, tok->col)
+        ? parse_indented_suite(p, is_loop_end, tok->line, tok->col)
         : parse_block_until(p, is_loop_end, tok->line, tok->col, 0);
     if (!node->body || (!indented_suite && !expect_word(p, "焉", "焉"))) {
         ast_free(node);
@@ -943,13 +1085,14 @@ static Node *parse_ifchain(Parser *p)
     }
     node_if_append_branch(node, cond, then_block);
 
-    while (is_else(p)) {
+    while (is_else(p) &&
+           (peek(p)->line == tok->line || peek(p)->col == tok->col)) {
         static const char *else_words[] = {"不然", "否則"};
         const Token *else_tok = peek(p);
         int branch_suite;
 
         match_any_word(p, else_words, 2);
-        if (match_word(p, "若")) {
+        if (peek(p)->line == else_tok->line && match_word(p, "若")) {
             cond = parse_cond(p);
             if (!cond) {
                 ast_free(node);
@@ -981,7 +1124,7 @@ static Node *parse_ifchain(Parser *p)
                        peek(p)->col > else_tok->col;
         indented_suite = indented_suite || branch_suite;
         node->els = branch_suite
-            ? parse_suite(p, is_if_end, else_tok->line, else_tok->col)
+            ? parse_suite(p, is_if_else_body_stop, else_tok->line, else_tok->col)
             : parse_block_until(p, is_if_end,
                                 else_tok->line, else_tok->col, 0);
         if (!node->els) {
@@ -1036,7 +1179,7 @@ static Node *parse_function(Parser *p)
 
     while (match_word(p, "受")) {
         saw_param = 0;
-        while (peek(p)->type == T_HAN) {
+        for (;;) {
             int var;
             int line = peek(p)->line;
 
@@ -1046,14 +1189,11 @@ static Node *parse_function(Parser *p)
             expect_var(p, &var);
             node_func_append_param(node, var, line);
             saw_param = 1;
-            if (!match_word(p, "及")) {
-                continue;
-            }
-            if (!expect_var(p, &var)) {
+            if (match_word(p, "及") && !var_at(p, p->pos, &var)) {
+                fail(p, peek(p)->line, "闕天干");
                 ast_free(node);
                 return NULL;
             }
-            node_func_append_param(node, var, line);
         }
         if (!saw_param) {
             fail(p, peek(p)->line, "闕受之天干");
@@ -1118,6 +1258,9 @@ Node *parse_program(const Token *tokens, int count, char **error)
     p.count = count;
     p.pos = 0;
     p.error = NULL;
+    p.block_line = 0;
+    p.block_col = 0;
+    p.indent_stop = 0;
 
     program = parse_block_until(&p, is_eof_stop, 0, 0, 0);
     if (program && peek(&p)->type != T_EOF) {

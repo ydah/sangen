@@ -13,7 +13,7 @@ run_case() {
     ./sangen "examples/$name.kbn" --字碼 > /dev/null
 
     ./sangen "examples/$name.kbn" --譯=c > "test/.$name.c"
-    cc -std=c99 -Wall -Wextra -o "test/.$name"_c "test/.$name.c"
+    cc -std=c99 -Wall -Wextra -Werror -o "test/.$name"_c "test/.$name.c"
     "./test/.$name"_c > "test/.actual_${name}_c.txt"
     diff -u "test/expected/$name.txt" "test/.actual_${name}_c.txt"
 }
@@ -40,7 +40,7 @@ run_error_path() {
 run_error_backend() {
     name="$1"
     ./sangen "test/errors/$name.kbn" --譯=c > "test/.error_$name.c"
-    cc -std=c99 -Wall -Wextra -o "test/.error_${name}_c" "test/.error_$name.c"
+    cc -std=c99 -Wall -Wextra -Werror -o "test/.error_${name}_c" "test/.error_$name.c"
     if "./test/.error_${name}_c" > "test/.actual_${name}_c_out.txt" 2> "test/.actual_${name}_c_err.txt"; then
         echo "expected generated C failure: $name" >&2
         exit 1
@@ -58,6 +58,111 @@ run_error_arg() {
     diff -u "test/expected/errors/$name.txt" "test/.actual_${name}_${arg}_err.txt"
 }
 
+run_rewrite() {
+    name="$1"
+    source="$2"
+    rewrite="test/.actual_${name}_rewrite.kbn"
+
+    ./sangen "$source" --文樹 > "test/.actual_${name}_before_ast.txt"
+    ./sangen "$source" --整 > "$rewrite"
+    ./sangen "$rewrite" --文樹 > "test/.actual_${name}_after_ast.txt"
+    diff -u "test/.actual_${name}_before_ast.txt" "test/.actual_${name}_after_ast.txt"
+
+    ./sangen "$source" > "test/.actual_${name}_before.txt"
+    ./sangen "$rewrite" > "test/.actual_${name}_after.txt"
+    diff -u "test/.actual_${name}_before.txt" "test/.actual_${name}_after.txt"
+
+    ./sangen "$rewrite" --正格 > /dev/null
+    ./sangen "$rewrite" --整 > "test/.actual_${name}_rewrite_twice.kbn"
+    diff -u "$rewrite" "test/.actual_${name}_rewrite_twice.kbn"
+}
+
+run_backend_match() {
+    name="$1"
+    source="$2"
+
+    ./sangen "$source" > "test/.actual_${name}_interp.txt"
+    ./sangen "$source" --譯=c > "test/.${name}.c"
+    cc -std=c99 -Wall -Wextra -Werror -o "test/.${name}_c" "test/.${name}.c"
+    "test/.${name}_c" > "test/.actual_${name}_backend.txt"
+    diff -u "test/.actual_${name}_interp.txt" "test/.actual_${name}_backend.txt"
+}
+
+run_expr_matrix() {
+    source="test/.actual_expr_matrix_source.kbn"
+    case_id=0
+
+    for lhs in 甲 七 夫甲與乙之和者 夫用雙術以甲及乙者; do
+        for rhs in 乙 五 夫甲與乙之差者 夫用雙術以乙及丙者; do
+            for op in 和 差 積 商 餘; do
+                case_id=$((case_id + 1))
+                printf '%s\n' \
+                    '夫雙者術也' \
+                    '　受甲及乙' \
+                    '　乃得甲與乙之和' \
+                    '置八於甲' \
+                    '置三於乙' \
+                    '置二於丙' \
+                    "書${lhs}與${rhs}之${op}" > "$source"
+                run_rewrite "expr_matrix_$case_id" "$source"
+            done
+        done
+    done
+}
+
+run_cond_matrix() {
+    source="test/.actual_cond_matrix_source.kbn"
+    case_id=0
+
+    for lhs in 甲 七 夫甲與乙之和者 用雙術以甲及乙; do
+        for rhs in 乙 五 夫甲與乙之差者 用雙術以乙及丙; do
+            for op in 大於 小於 等於; do
+                case_id=$((case_id + 1))
+                printf '%s\n' \
+                    '夫雙者術也' \
+                    '　受甲及乙' \
+                    '　乃得甲與乙之和' \
+                    '置八於甲' \
+                    '置三於乙' \
+                    '置二於丙' \
+                    "若${lhs}${op}${rhs}則" \
+                    '　曰辭曰真辭畢' > "$source"
+                run_rewrite "cond_matrix_$case_id" "$source"
+            done
+        done
+    done
+}
+
+run_cond_expr_matrix() {
+    source="test/.actual_cond_expr_matrix_source.kbn"
+
+    printf '%s\n' \
+        '夫雙者術也' \
+        '　受甲及乙' \
+        '　乃得甲與乙之和' \
+        '置八於甲' \
+        '置三於乙' \
+        '置二於丙' > "$source"
+
+    for first in 甲 七 夫甲與乙之和者 夫用雙術以甲及乙者; do
+        for second in 乙 五 夫甲與乙之差者 夫用雙術以乙及丙者; do
+            printf '%s\n' \
+                "若以${first}減${second}所得之差則" \
+                '　曰辭曰差辭畢' \
+                "若以${first}爲法除${second}所得之商則" \
+                '　曰辭曰商辭畢' \
+                "若以${first}爲法除${second}所得之餘則" \
+                '　曰辭曰餘辭畢' \
+                "若以${first}除${second}而無餘則" \
+                '　曰辭曰無餘辭畢' \
+                "若以${first}除${second}而有餘則" \
+                '　曰辭曰有餘辭畢' >> "$source"
+        done
+    done
+
+    run_rewrite cond_expr_matrix "$source"
+}
+
 run_case fizzbuzz
 run_case double
 run_case gcd
@@ -70,6 +175,22 @@ run_case context
 run_case reten
 run_case grammar
 run_case reten_compat
+for name in fizzbuzz double gcd compare numerals ops string compat context grammar; do
+    run_rewrite "$name" "examples/$name.kbn"
+done
+run_rewrite format_roundtrip test/format_roundtrip.kbn
+run_rewrite control_roundtrip test/control_roundtrip.kbn
+run_rewrite dangling_else_roundtrip test/dangling_else_roundtrip.kbn
+run_rewrite empty_blocks_roundtrip test/empty_blocks_roundtrip.kbn
+run_rewrite legacy_name_roundtrip test/legacy_name_roundtrip.kbn
+run_rewrite legacy_boundary_roundtrip test/legacy_boundary_roundtrip.kbn
+run_backend_match format_roundtrip test/format_roundtrip.kbn
+run_backend_match control_roundtrip test/control_roundtrip.kbn
+run_backend_match dangling_else_roundtrip test/dangling_else_roundtrip.kbn
+run_backend_match empty_blocks_roundtrip test/empty_blocks_roundtrip.kbn
+run_expr_matrix
+run_cond_matrix
+run_cond_expr_matrix
 ./sangen examples/reten_compat.kbn --校=訓點 > test/.actual_reten_compat_lint.txt
 diff -u test/expected/debug/reten_compat_lint.txt test/.actual_reten_compat_lint.txt
 if ./sangen examples/grammar.kbn --文法=v2 > test/.actual_removed_grammar_option.out 2> test/.actual_removed_grammar_option.err; then
@@ -85,15 +206,25 @@ diff -u test/expected/debug/fizzbuzz_ast.txt test/.actual_fizzbuzz_ast.txt
 
 ./sangen examples/compat.kbn --校 > test/.actual_compat_lint.txt
 diff -u test/expected/debug/compat_lint.txt test/.actual_compat_lint.txt
+./sangen test/lint_context.kbn --校 > test/.actual_lint_context.txt
+diff -u test/expected/debug/lint_context.txt test/.actual_lint_context.txt
+./sangen test/lint_bare_proc.kbn --校 > test/.actual_lint_bare_proc.txt
+diff -u test/expected/debug/lint_bare_proc.txt test/.actual_lint_bare_proc.txt
+./sangen test/lint_dividend.kbn --校=文法 > test/.actual_lint_dividend.txt
+diff -u test/expected/debug/lint_dividend.txt test/.actual_lint_dividend.txt
+./sangen test/errors/undefined_func.kbn --校=文法 > test/.actual_undefined_func_lint.txt
+test ! -s test/.actual_undefined_func_lint.txt
+if ./sangen test/lint_dividend.kbn --正格 > test/.actual_lint_dividend_strict_out.txt 2> test/.actual_lint_dividend_strict_err.txt; then
+    echo "expected 正格 failure: lint_dividend" >&2
+    exit 1
+fi
+diff -u test/expected/debug/lint_dividend.txt test/.actual_lint_dividend_strict_err.txt
 if ./sangen examples/compat.kbn --正格 > test/.actual_compat_strict_out.txt 2> test/.actual_compat_strict_err.txt; then
     echo "expected 正格 failure: compat" >&2
     exit 1
 fi
 diff -u test/expected/debug/compat_lint.txt test/.actual_compat_strict_err.txt
-./sangen examples/compat.kbn --整 > test/.actual_compat_rewrite.kbn
 diff -u test/expected/debug/compat_rewrite.kbn test/.actual_compat_rewrite.kbn
-./sangen test/.actual_compat_rewrite.kbn > test/.actual_compat_rewrite_out.txt
-diff -u test/expected/compat.txt test/.actual_compat_rewrite_out.txt
 
 ./sangen examples/reten.kbn --詞 > test/.actual_reten_tokens.txt
 diff -u test/expected/debug/reten_tokens.txt test/.actual_reten_tokens.txt
@@ -121,6 +252,7 @@ run_error overflow
 run_error duplicate_func
 run_error duplicate_param
 run_error nested_func
+run_error split_keyword
 run_error reten_no_before
 run_error reten_no_after
 run_error reten_duplicate
@@ -143,6 +275,7 @@ run_error_backend undefined_var
 run_error_backend reversed_range
 run_error_backend overflow
 run_error_arg undefined_func --譯=c
+run_error_arg undefined_func --正格
 
 ./sangen test/errors/missing_then.kbn --詞 > /dev/null
 

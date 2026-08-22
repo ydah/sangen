@@ -462,7 +462,7 @@ static void emit_function(FILE *out, const Node *func, int index, const EmitCtx 
     fprintf(out, "long fn%d(long caller_v[10], int caller_d[10], const char *call_line, const long *call_args, int call_nargs) {\n", index);
     fputs("    long v[10] = {0};\n", out);
     fputs("    int d[10] = {0};\n", out);
-    fputs("    (void)caller_v; (void)caller_d; (void)call_args; (void)call_nargs; (void)v; (void)d;\n", out);
+    fputs("    (void)caller_v; (void)caller_d; (void)call_line; (void)call_args; (void)call_nargs; (void)v; (void)d;\n", out);
 
     for (i = 0; i < func->nparam; i++) {
         int var = func->params[i];
